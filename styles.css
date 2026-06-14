@@ -8,6 +8,9 @@
   --focus: #2563eb;
   --grid-width: 1340px;
   --grid-height: 852px;
+  --preview-scale: 1;
+  --preview-page-width: var(--grid-width);
+  --preview-page-height: var(--grid-height);
   --a4-width: 297mm;
   --a4-height: 210mm;
   --print-side-margin: 5mm;
@@ -482,14 +485,14 @@ button {
 }
 
 .sop-page {
-  width: var(--grid-width);
-  height: var(--grid-height);
+  width: var(--preview-page-width);
+  height: var(--preview-page-height);
   flex: 0 0 auto;
 }
 
 .sop-scale {
-  width: var(--grid-width);
-  height: var(--grid-height);
+  width: var(--preview-page-width);
+  height: var(--preview-page-height);
 }
 
 .sop-sheet {
@@ -503,6 +506,8 @@ button {
   grid-template-rows: 72fr repeat(26, 30fr);
   background: var(--paper);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  transform: scale(var(--preview-scale));
+  transform-origin: left top;
 }
 
 .sop-cell {

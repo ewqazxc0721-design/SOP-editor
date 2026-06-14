@@ -169,10 +169,12 @@
   document.addEventListener("input", handleDocumentInput);
   document.addEventListener("paste", handleDocumentPaste);
   document.addEventListener("keydown", handleDocumentKeyDown);
+  window.addEventListener("load", schedulePreviewScaleUpdate);
   window.addEventListener("afterprint", restorePendingBatchPrint);
 
   window.addEventListener("scroll", queueCurrentPageSync, { passive: true });
   window.addEventListener("resize", () => {
+    schedulePreviewScaleUpdate();
     document.querySelectorAll(".image-cell[data-has-image='true']").forEach((slot) => {
       if (!isLogoSlot(slot) && slot.dataset.mediaKind === "image") {
         clampImage(slot);
@@ -186,8 +188,10 @@
     queueCurrentPageSync();
   });
 
+  schedulePreviewScaleUpdate();
   buildImageEditor();
   addPage();
+  schedulePreviewScaleUpdate();
   initializeProjectState();
   initializeLibrary();
 
@@ -219,6 +223,34 @@
       label: options.label || "插入图片",
       cellKey: options.cellKey || `c${col}r${row}`
     };
+  }
+
+  function schedulePreviewScaleUpdate() {
+    updatePreviewScale();
+    window.requestAnimationFrame(updatePreviewScale);
+    window.setTimeout(updatePreviewScale, 100);
+    window.setTimeout(updatePreviewScale, 500);
+  }
+
+  function updatePreviewScale() {
+    const workspace = document.querySelector(".workspace");
+    if (!workspace) return;
+
+    const root = document.documentElement;
+    const rootStyles = getComputedStyle(root);
+    const workspaceStyles = getComputedStyle(workspace);
+    const gridWidth = Number.parseFloat(rootStyles.getPropertyValue("--grid-width")) || 1340;
+    const gridHeight = Number.parseFloat(rootStyles.getPropertyValue("--grid-height")) || 852;
+    const paddingX = (Number.parseFloat(workspaceStyles.paddingLeft) || 0) + (Number.parseFloat(workspaceStyles.paddingRight) || 0);
+    const paddingY = (Number.parseFloat(workspaceStyles.paddingTop) || 0) + (Number.parseFloat(workspaceStyles.paddingBottom) || 0);
+    const availableWidth = Math.max(0, workspace.clientWidth - paddingX);
+    const availableHeight = Math.max(0, workspace.clientHeight - paddingY);
+    const fitScale = Math.min(availableWidth / gridWidth, availableHeight / gridHeight);
+    const previewScale = clamp(Number.isFinite(fitScale) ? fitScale : 1, 1, 1.2);
+
+    root.style.setProperty("--preview-scale", previewScale.toFixed(4));
+    root.style.setProperty("--preview-page-width", `${roundCoordinate(gridWidth * previewScale)}px`);
+    root.style.setProperty("--preview-page-height", `${roundCoordinate(gridHeight * previewScale)}px`);
   }
 
   function addPage(options = {}) {
