@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SOP模板编辑器</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="side-toolbar" aria-label="SOP工具栏">
+      <div class="toolbar-title">SOP工具栏</div>
+      <div class="app-version" id="app-version">应用版本</div>
+      <div class="toolbar-section">
+        <div class="toolbar-section-title">页面</div>
+      <button class="toolbar-button primary" id="add-page" type="button">
+        <span class="button-icon">+</span>
+        <span>新增页面</span>
+      </button>
+      <button class="toolbar-button" id="delete-page" type="button">
+        <span class="button-icon">×</span>
+        <span>删除当前页</span>
+      </button>
+      <button class="toolbar-button" id="print-pages" type="button">
+        <span class="button-icon">PDF</span>
+        <span>导出PDF</span>
+      </button>
+      <button class="toolbar-button" id="batch-print-pages" type="button">
+        <span class="button-icon">PDF+</span>
+        <span>批量导出PDF</span>
+      </button>
+      </div>
+      <div class="page-count" id="page-count">1 / 1</div>
+      <nav class="page-list" id="page-list" aria-label="页面列表"></nav>
+    </aside>
+
+    <section class="workspace" aria-label="SOP页面">
+      <div class="pages" id="pages"></div>
+    </section>
+
+    <aside class="library-panel" aria-label="SOP历史记录">
+      <div class="library-header">
+        <strong>SOP库</strong>
+        <span id="library-count">0</span>
+      </div>
+      <div class="library-section-title">文件</div>
+      <div class="library-file-actions">
+        <button class="toolbar-button" id="new-file" type="button">
+          <span class="button-icon">N</span>
+          <span>新建SOP</span>
+        </button>
+        <button class="toolbar-button" id="open-file" type="button">
+          <span class="button-icon">O</span>
+          <span>打开SOP</span>
+        </button>
+        <button class="toolbar-button primary" id="save-file" type="button">
+          <span class="button-icon">S</span>
+          <span>保存SOP</span>
+        </button>
+        <button class="toolbar-button" id="save-as-file" type="button">
+          <span class="button-icon">AS</span>
+          <span>另存为</span>
+        </button>
+        <button class="toolbar-button" id="create-version" type="button">
+          <span class="button-icon">V</span>
+          <span>保存版本</span>
+        </button>
+        <select class="version-select" id="version-select" aria-label="版本历史"></select>
+        <div class="file-status" id="file-status">未命名</div>
+        <input class="file-input" id="open-project-input" type="file" accept=".sop.json,.json,application/json">
+      </div>
+      <div class="library-section-title">电脑文件夹</div>
+      <div class="library-actions">
+        <button class="library-action-button primary" id="library-pick-folder" type="button">选择文件夹</button>
+        <button class="library-action-button" id="library-refresh-folder" type="button">刷新文件夹</button>
+        <button class="library-action-button" id="library-new-folder" type="button">新建文件夹</button>
+        <button class="library-action-button" id="library-save-current" type="button">保存当前</button>
+      </div>
+      <div class="library-section-title">文件夹</div>
+      <div class="folder-list" id="library-folder-list"></div>
+      <div class="library-section-title">SOP历史记录</div>
+      <div class="sop-library-list" id="sop-library-list"></div>
+      <div class="library-status" id="library-status">电脑文件夹准备中</div>
+    </aside>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
