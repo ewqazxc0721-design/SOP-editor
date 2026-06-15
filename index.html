@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SOP模板编辑器</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=1.6.0">
 </head>
 <body>
   <main class="app-shell">
@@ -29,12 +29,38 @@
         <span class="button-icon">PDF+</span>
         <span>批量导出PDF</span>
       </button>
+      <button class="toolbar-button" id="export-pptx" type="button">
+        <span class="button-icon">PPT</span>
+        <span>导出PPT</span>
+      </button>
+      <button class="toolbar-button" id="batch-export-pptx" type="button">
+        <span class="button-icon">PPT+</span>
+        <span>批量导出PPT</span>
+      </button>
       </div>
       <div class="page-count" id="page-count">1 / 1</div>
       <nav class="page-list" id="page-list" aria-label="页面列表"></nav>
     </aside>
 
     <section class="workspace" aria-label="SOP页面">
+      <div class="global-edit-toolbar" aria-label="全局编辑栏">
+        <div class="global-color-control" aria-label="预设颜色">
+          <span>颜色</span>
+          <div class="preset-color-list" id="global-edit-color-presets"></div>
+        </div>
+        <label class="global-font-control" for="global-edit-font-size">
+          <span>字号</span>
+          <button class="global-font-step-button" id="global-edit-font-decrease" type="button" aria-label="减小字号">-</button>
+          <input id="global-edit-font-size" type="number" min="8" max="96" step="1" inputmode="numeric" aria-label="文字字号" disabled>
+          <button class="global-font-step-button" id="global-edit-font-increase" type="button" aria-label="增大字号">+</button>
+        </label>
+        <button class="global-edit-button" id="global-edit-text" type="button" data-global-action="text">文本框</button>
+        <button class="global-edit-button" id="global-edit-bubble" type="button" data-global-action="bubble">气泡文本</button>
+        <button class="global-edit-button" id="global-edit-circle" type="button" data-global-action="circle">圆圈</button>
+        <button class="global-edit-button" id="global-edit-rect" type="button" data-global-action="rect">矩形框</button>
+        <button class="global-edit-button" id="global-edit-arrow" type="button" data-global-action="arrow">箭头</button>
+        <button class="global-edit-button danger" id="global-edit-delete" type="button" data-global-action="delete">删除所选</button>
+      </div>
       <div class="pages" id="pages"></div>
     </section>
 
@@ -135,6 +161,6 @@
 
   <script src="./vendor/xlsx.full.min.js"></script>
   <script src="./vendor/jszip.min.js"></script>
-  <script src="./app.js"></script>
+  <script src="./app.js?v=1.6.0"></script>
 </body>
 </html>

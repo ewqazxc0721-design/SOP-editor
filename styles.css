@@ -243,6 +243,158 @@ button {
   padding: 24px 32px;
 }
 
+.global-edit-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 24;
+  display: flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 8px;
+  overflow-x: auto;
+  color: #111827;
+  background: rgba(248, 250, 252, 0.94);
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(8px);
+}
+
+.global-edit-button {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 10px;
+  color: #172033;
+  background: #ffffff;
+  border: 1px solid #b9c2cf;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.global-edit-button:hover {
+  background: #eef4ff;
+  border-color: #8bb8ff;
+}
+
+.global-edit-button.active {
+  color: #0f2b55;
+  background: #dbeafe;
+  border-color: #60a5fa;
+}
+
+.global-edit-button.danger {
+  color: #991b1b;
+}
+
+.global-edit-button:disabled {
+  color: #94a3b8;
+  background: #eef1f5;
+  border-color: #d1d5db;
+  cursor: not-allowed;
+}
+
+.global-color-control,
+.global-font-control,
+.editor-color-control,
+.editor-font-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  color: #172033;
+  background: #ffffff;
+  border: 1px solid #b9c2cf;
+  border-radius: 6px;
+}
+
+.global-color-control span,
+.global-font-control span,
+.editor-color-control span,
+.editor-font-control span {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.preset-color-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.preset-color-button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: var(--preset-color);
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #a8b3c4;
+  cursor: pointer;
+}
+
+.preset-color-button:hover:not(:disabled),
+.preset-color-button.is-active {
+  box-shadow: 0 0 0 2px #2563eb;
+}
+
+.preset-color-button.is-active {
+  transform: scale(1.08);
+}
+
+.preset-color-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.global-font-control input,
+.editor-font-control input {
+  width: 52px;
+  height: 24px;
+  padding: 0 5px;
+  color: #111827;
+  text-align: center;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+}
+
+.global-font-control input:disabled,
+.editor-font-control input:disabled {
+  color: #94a3b8;
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+
+.global-font-step-button,
+.editor-font-step-button {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: #172033;
+  background: #eef4ff;
+  border: 1px solid #b9c2cf;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.global-font-step-button:hover:not(:disabled),
+.editor-font-step-button:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: #60a5fa;
+}
+
+.global-font-step-button:disabled,
+.editor-font-step-button:disabled {
+  color: #94a3b8;
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+
 .library-panel {
   position: sticky;
   top: 0;
@@ -848,11 +1000,13 @@ button {
 }
 
 .sop-scale {
+  position: relative;
   width: var(--preview-page-width);
   height: var(--preview-page-height);
 }
 
 .sop-sheet {
+  position: relative;
   display: grid;
   width: var(--grid-width);
   height: var(--grid-height);
@@ -891,6 +1045,49 @@ button {
   z-index: 5;
   outline: 2px solid var(--focus);
   outline-offset: -2px;
+}
+
+.text-cell[data-field-mode="fields"] {
+  gap: 10px;
+}
+
+.footer-cell[data-field-mode="fields"] {
+  gap: 16px;
+}
+
+.editable-cell-field {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  line-height: inherit;
+}
+
+.editable-cell-field[data-grow="true"] {
+  flex: 1 1 auto;
+}
+
+.editable-cell-label {
+  flex: 0 0 auto;
+  user-select: none;
+}
+
+.editable-cell-value {
+  display: inline-block;
+  min-width: calc(var(--field-min-chars, 4) * 1em);
+  min-height: 1em;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  outline: none;
+}
+
+.editable-cell-field[data-grow="true"] .editable-cell-value {
+  flex: 1 1 auto;
+}
+
+.editable-cell-value:focus {
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 2px var(--focus);
 }
 
 .header-cell {
@@ -1040,6 +1237,14 @@ button {
   pointer-events: none;
 }
 
+.annotation-arrow-head {
+  pointer-events: none;
+}
+
+.annotation-arrow-curve {
+  fill: none;
+}
+
 .annotation-shape.is-selected {
   stroke-dasharray: 7 4;
   filter: drop-shadow(0 0 2px rgba(37, 99, 235, 0.8));
@@ -1054,19 +1259,228 @@ button {
 
 .slot-text-box {
   position: absolute;
+  z-index: 2;
   display: flex;
   min-width: 0;
   min-height: 0;
   align-items: center;
   overflow: hidden;
   padding: 3px 5px;
-  color: #ef1d1d;
+  color: var(--overlay-color, #ef1d1d);
   font-weight: 700;
   line-height: 1.15;
   white-space: pre-wrap;
   word-break: break-word;
   background: #fff;
-  border: 1px solid rgba(239, 29, 29, 0.55);
+  border: 1px solid var(--overlay-color, rgba(239, 29, 29, 0.55));
+}
+
+.slot-text-box.is-bubble {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 12px;
+}
+
+.slot-bubble-tail-svg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.slot-bubble-shape {
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.global-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.global-annotation-layer {
+  z-index: 1;
+}
+
+.global-annotation-shape {
+  fill: none;
+  stroke: #ef1d1d;
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: all;
+  cursor: move;
+}
+
+.global-annotation-shape.is-selected {
+  stroke-dasharray: 9 5;
+  filter: drop-shadow(0 0 3px rgba(37, 99, 235, 0.9));
+}
+
+.global-resize-handle {
+  fill: #ffffff;
+  stroke: #2563eb;
+  stroke-width: 2;
+  pointer-events: all;
+}
+
+.global-resize-handle[data-handle="control"] {
+  fill: #fff7ed;
+  stroke: #f97316;
+}
+
+.global-text-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.global-text-box {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  min-width: 36px;
+  min-height: 24px;
+  color: var(--overlay-color, #ef1d1d);
+  font-weight: 700;
+  line-height: 1.15;
+  background: #ffffff;
+  border: 2px solid var(--overlay-color, rgba(239, 29, 29, 0.78));
+  cursor: move;
+  pointer-events: all;
+}
+
+.global-text-box.is-selected {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.global-text-box.is-bubble {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 16px;
+}
+
+.global-bubble-tail-svg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.global-bubble-shape {
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.global-bubble-tail-handle {
+  position: absolute;
+  z-index: 5;
+  display: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: #ffffff;
+  border: 2px solid #2563eb;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.22);
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  pointer-events: all;
+}
+
+.global-bubble-tail-handle:active {
+  cursor: grabbing;
+}
+
+.global-text-content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  overflow: hidden;
+  padding: 5px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  outline: none;
+}
+
+.global-text-box.is-bubble .global-text-content {
+  padding: 10px 16px;
+}
+
+.global-text-move-handle,
+.global-text-drag-handle,
+.global-text-resize-handle {
+  position: absolute;
+  display: none;
+  z-index: 3;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: #ffffff;
+  border: 2px solid #2563eb;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.22);
+}
+
+.global-text-box:hover .global-text-move-handle,
+.global-text-box:hover .global-text-drag-handle,
+.global-text-box:hover .global-text-resize-handle,
+.global-text-box.is-selected .global-text-move-handle,
+.global-text-box.is-selected .global-text-drag-handle,
+.global-text-box.is-selected .global-text-resize-handle,
+.global-bubble-tail-handle {
+  display: block;
+}
+
+.global-text-move-handle {
+  left: -11px;
+  top: -11px;
+  cursor: move;
+}
+
+.global-text-drag-handle {
+  top: -13px;
+  right: -13px;
+  z-index: 5;
+  width: 24px;
+  height: 24px;
+  color: #1d4ed8;
+  border-radius: 6px;
+  cursor: grab;
+}
+
+.global-text-drag-handle::before {
+  content: "✥";
+  display: block;
+  font-size: 16px;
+  line-height: 18px;
+}
+
+.global-text-drag-handle:active {
+  cursor: grabbing;
+}
+
+.global-text-resize-handle {
+  right: -11px;
+  bottom: -11px;
+  cursor: nwse-resize;
 }
 
 .logo-image[data-media-kind="image"] img {
@@ -1318,6 +1732,11 @@ body.editor-open {
   pointer-events: all;
 }
 
+.editor-resize-handle[data-handle="control"] {
+  fill: #fff7ed;
+  stroke: #f97316;
+}
+
 .editor-text-layer {
   position: absolute;
   inset: 0;
@@ -1325,16 +1744,33 @@ body.editor-open {
   pointer-events: none;
 }
 
+.editor-bubble-tail-svg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.editor-bubble-shape {
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .editor-text-box {
   position: absolute;
+  z-index: 2;
   display: flex;
   min-width: 28px;
   min-height: 18px;
-  color: #ef1d1d;
+  color: var(--overlay-color, #ef1d1d);
   font-weight: 700;
   line-height: 1.15;
   background: #ffffff;
-  border: 1px solid rgba(239, 29, 29, 0.65);
+  border: 1px solid var(--overlay-color, rgba(239, 29, 29, 0.65));
   cursor: move;
   pointer-events: all;
 }
@@ -1342,6 +1778,12 @@ body.editor-open {
 .editor-text-box.is-selected {
   outline: 2px solid #2563eb;
   outline-offset: 2px;
+}
+
+.editor-text-box.is-bubble {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 14px;
 }
 
 .editor-text-content {
@@ -1356,6 +1798,8 @@ body.editor-open {
 }
 
 .editor-text-move-handle,
+.editor-text-drag-handle,
+.editor-bubble-tail-handle,
 .editor-text-resize-handle {
   position: absolute;
   display: none;
@@ -1370,9 +1814,12 @@ body.editor-open {
 }
 
 .editor-text-box:hover .editor-text-move-handle,
+.editor-text-box:hover .editor-text-drag-handle,
 .editor-text-box:hover .editor-text-resize-handle,
 .editor-text-box.is-selected .editor-text-move-handle,
-.editor-text-box.is-selected .editor-text-resize-handle {
+.editor-text-box.is-selected .editor-text-drag-handle,
+.editor-text-box.is-selected .editor-text-resize-handle,
+.editor-bubble-tail-handle.is-selected {
   display: block;
 }
 
@@ -1382,15 +1829,52 @@ body.editor-open {
   cursor: move;
 }
 
+.editor-text-drag-handle {
+  top: -13px;
+  right: -13px;
+  z-index: 5;
+  width: 24px;
+  height: 24px;
+  color: #1d4ed8;
+  border-radius: 6px;
+  cursor: grab;
+}
+
+.editor-text-drag-handle::before {
+  content: "✥";
+  display: block;
+  font-size: 16px;
+  line-height: 18px;
+}
+
+.editor-text-drag-handle:active {
+  cursor: grabbing;
+}
+
 .editor-text-resize-handle {
   right: -11px;
   bottom: -11px;
   cursor: nwse-resize;
 }
 
+.editor-bubble-tail-handle {
+  z-index: 5;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  cursor: grab;
+  pointer-events: all;
+}
+
+.editor-bubble-tail-handle:active {
+  cursor: grabbing;
+}
+
 .image-editor-toolbar {
   display: flex;
   min-height: 62px;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 8px;
@@ -1507,6 +1991,7 @@ body.editor-open {
   .side-toolbar,
   .library-panel,
   .bom-preview-panel,
+  .global-edit-toolbar,
   .material-search-popover {
     display: none;
   }
@@ -1565,5 +2050,22 @@ body.editor-open {
   .annotation-shape.is-selected {
     stroke-dasharray: none;
     filter: none;
+  }
+
+  .global-annotation-shape.is-selected {
+    stroke-dasharray: none;
+    filter: none;
+  }
+
+  .global-text-box.is-selected {
+    outline: none;
+  }
+
+  .global-resize-handle,
+  .global-text-move-handle,
+  .global-text-drag-handle,
+  .global-text-resize-handle,
+  .global-bubble-tail-handle {
+    display: none !important;
   }
 }

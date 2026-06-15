@@ -6,6 +6,8 @@
   const deletePageButton = document.getElementById("delete-page");
   const printButton = document.getElementById("print-pages");
   const batchPrintButton = document.getElementById("batch-print-pages");
+  const exportPptxButton = document.getElementById("export-pptx");
+  const batchExportPptxButton = document.getElementById("batch-export-pptx");
   const appShellEl = document.querySelector(".app-shell");
   const libraryPanelEl = document.querySelector(".library-panel");
   const libraryToggleButton = document.getElementById("library-toggle");
@@ -45,9 +47,44 @@
   const bomPreviewStatus = document.getElementById("bom-preview-status");
   const bomPreviewTable = document.getElementById("bom-preview-table");
   const bomPreviewCloseButton = document.getElementById("bom-preview-close");
+  const globalColorPresetList = document.getElementById("global-edit-color-presets");
+  const globalFontSizeInput = document.getElementById("global-edit-font-size");
+  const globalFontDecreaseButton = document.getElementById("global-edit-font-decrease");
+  const globalFontIncreaseButton = document.getElementById("global-edit-font-increase");
+  const globalEditButtons = {
+    text: document.getElementById("global-edit-text"),
+    bubble: document.getElementById("global-edit-bubble"),
+    circle: document.getElementById("global-edit-circle"),
+    rect: document.getElementById("global-edit-rect"),
+    arrow: document.getElementById("global-edit-arrow"),
+    delete: document.getElementById("global-edit-delete")
+  };
 
-  const APP_VERSION = "1.3.0";
+  const APP_VERSION = "1.6.0";
   const SOP_SCHEMA_VERSION = 2;
+  const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
+  const PRESET_OVERLAY_COLORS = [
+    { name: "红色", value: "#ef1d1d" },
+    { name: "橙色", value: "#f97316" },
+    { name: "黄色", value: "#eab308" },
+    { name: "绿色", value: "#16a34a" },
+    { name: "蓝色", value: "#2563eb" },
+    { name: "紫色", value: "#9333ea" },
+    { name: "黑色", value: "#111827" }
+  ];
+  const GLOBAL_TEXT_FONT_MIN = 8;
+  const GLOBAL_TEXT_FONT_MAX = 96;
+  const EMU_PER_MM = 36000;
+  const PPT_SLIDE_WIDTH_MM = 297;
+  const PPT_SLIDE_HEIGHT_MM = 210;
+  const PPT_CONTENT_X_MM = 5;
+  const PPT_CONTENT_WIDTH_MM = 287;
+  const PPT_CONTENT_HEIGHT_MM = 182.48;
+  const PPT_CONTENT_Y_MM = (PPT_SLIDE_HEIGHT_MM - PPT_CONTENT_HEIGHT_MM) / 2;
+  const PPT_GRID_WIDTH = 1340;
+  const PPT_GRID_HEIGHT = 852;
+  const PPT_COL_FRACTIONS = [54, 54, 112, 112, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84];
+  const PPT_ROW_FRACTIONS = [72, ...Array(26).fill(30)];
   const SOP_FILE_TYPE = "sop-template-project";
   const LIBRARY_DB_NAME = "sop-template-library";
   const LIBRARY_DB_VERSION = 3;
@@ -67,7 +104,7 @@
   let nextPageId = 1;
   let currentPageId = null;
   let activeImageSlot = null;
-  let activeMaterialNumberCell = null;
+  let activeMaterialSearchCell = null;
   let draggedPageId = null;
   let nextAnnotationLayerId = 1;
   let nextOverlayId = 1;
@@ -117,6 +154,13 @@
     list: null
   };
 
+  const globalEditor = {
+    mode: "select",
+    color: DEFAULT_OVERLAY_COLOR,
+    selected: null,
+    drag: null
+  };
+
   const editor = {
     isOpen: false,
     slot: null,
@@ -131,13 +175,24 @@
     image: null,
     svg: null,
     textLayer: null,
+    color: DEFAULT_OVERLAY_COLOR,
+    colorPresetList: null,
+    fontSizeInput: null,
+    fontDecreaseButton: null,
+    fontIncreaseButton: null,
     buttons: {}
   };
 
   const templateCells = [
-    textCell(1, 1, 4, 1, "  产品名称/编号：", "header-cell left"),
-    textCell(5, 1, 5, 1, "  工序：", "header-cell left"),
-    textCell(10, 1, 4, 1, "  组装模块：", "header-cell left"),
+    textCell(1, 1, 4, 1, "  产品名称/编号：", "header-cell left", {
+      fields: [{ key: "value", label: "  产品名称/编号：", grow: true, minChars: 8 }]
+    }),
+    textCell(5, 1, 5, 1, "  工序：", "header-cell left", {
+      fields: [{ key: "value", label: "  工序：", grow: true, minChars: 8 }]
+    }),
+    textCell(10, 1, 4, 1, "  组装模块：", "header-cell left", {
+      fields: [{ key: "value", label: "  组装模块：", grow: true, minChars: 8 }]
+    }),
     imageCell(14, 1, 3, 1, {
       logo: true,
       label: "插入logo",
@@ -155,10 +210,18 @@
     textCell(11, 11, 3, 2, "", "blank-cell left"),
     textCell(14, 11, 3, 2, "", "blank-cell left"),
 
-    textCell(5, 13, 3, 1, "  特殊标注：", "note-cell left"),
-    textCell(8, 13, 3, 1, "  特殊标注：", "note-cell left"),
-    textCell(11, 13, 3, 1, "  特殊标注：", "note-cell left"),
-    textCell(14, 13, 3, 1, " 特殊标注：", "note-cell left"),
+    textCell(5, 13, 3, 1, "  特殊标注：", "note-cell left", {
+      fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
+    }),
+    textCell(8, 13, 3, 1, "  特殊标注：", "note-cell left", {
+      fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
+    }),
+    textCell(11, 13, 3, 1, "  特殊标注：", "note-cell left", {
+      fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
+    }),
+    textCell(14, 13, 3, 1, " 特殊标注：", "note-cell left", {
+      fields: [{ key: "value", label: " 特殊标注：", grow: true, minChars: 6 }]
+    }),
 
     imageCell(5, 14, 3, 9),
     imageCell(8, 14, 3, 9),
@@ -169,18 +232,43 @@
     textCell(11, 23, 3, 2, "", "blank-cell left"),
     textCell(14, 23, 3, 2, "", "blank-cell left"),
 
-    textCell(5, 25, 3, 1, "  特殊标注：", "note-cell left"),
-    textCell(8, 25, 3, 1, "  特殊标注：", "note-cell left"),
-    textCell(11, 25, 3, 1, "  特殊标注：", "note-cell left"),
-    textCell(14, 25, 3, 1, " 特殊标注：", "note-cell left"),
-    textCell(5, 26, 3, 1, "  标准工时：           人员：", "note-cell left"),
+    textCell(5, 25, 3, 1, "  特殊标注：", "note-cell left", {
+      fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
+    }),
+    textCell(8, 25, 3, 1, "  特殊标注：", "note-cell left", {
+      fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
+    }),
+    textCell(11, 25, 3, 1, "  特殊标注：", "note-cell left", {
+      fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
+    }),
+    textCell(14, 25, 3, 1, " 特殊标注：", "note-cell left", {
+      fields: [{ key: "value", label: " 特殊标注：", grow: true, minChars: 6 }]
+    }),
+    textCell(5, 26, 3, 1, "  标准工时：           人员：", "note-cell left", {
+      fields: [
+        { key: "standardTime", label: "  标准工时：", minChars: 6 },
+        { key: "people", label: "人员：", minChars: 5 }
+      ]
+    }),
     textCell(8, 26, 9, 1, "特殊标注：关键动作 / 装配方向 / 扭矩/ 质量确认 / 安全注意事项(防静电) ", "note-cell left"),
 
-    textCell(1, 27, 4, 1, "SOP编号：P7A0001   版本：A0   日期：20260531", "footer-cell left"),
-    textCell(5, 27, 3, 1, "", "footer-cell center", { autoPage: true }),
-    textCell(8, 27, 3, 1, "  编制：", "footer-cell left"),
-    textCell(11, 27, 3, 1, "   审核：", "footer-cell left"),
-    textCell(14, 27, 3, 1, "  批准：", "footer-cell left")
+    textCell(1, 27, 5, 1, "SOP编号：   版本：   日期：", "footer-cell left", {
+      fields: [
+        { key: "sopNumber", label: "SOP编号：", minChars: 10 },
+        { key: "version", label: "版本：", minChars: 3 },
+        { key: "date", label: "日期：", minChars: 6 }
+      ]
+    }),
+    textCell(6, 27, 2, 1, "", "footer-cell center", { autoPage: true }),
+    textCell(8, 27, 3, 1, "  编制：", "footer-cell left", {
+      fields: [{ key: "value", label: "  编制：", grow: true, minChars: 6 }]
+    }),
+    textCell(11, 27, 3, 1, "   审核：", "footer-cell left", {
+      fields: [{ key: "value", label: "   审核：", grow: true, minChars: 6 }]
+    }),
+    textCell(14, 27, 3, 1, "  批准：", "footer-cell left", {
+      fields: [{ key: "value", label: "  批准：", grow: true, minChars: 6 }]
+    })
   ];
 
   const materialRows = [3, 6, 9, 12, 15, 18, 21, 24];
@@ -193,15 +281,18 @@
     }));
     templateCells.push(textCell(3, row, 2, 1, "物料名称：", "material-label left", {
       materialIndex: index,
-      materialField: "name"
+      materialField: "name",
+      fields: [{ key: "value", label: "物料名称：", grow: true, minChars: 6 }]
     }));
     templateCells.push(textCell(3, row + 1, 2, 1, "物料编号：", "material-label left", {
       materialIndex: index,
-      materialField: "number"
+      materialField: "number",
+      fields: [{ key: "value", label: "物料编号：", grow: true, minChars: 6 }]
     }));
     templateCells.push(textCell(3, row + 2, 2, 1, "规格数量：", "material-label left", {
       materialIndex: index,
-      materialField: "spec"
+      materialField: "spec",
+      fields: [{ key: "value", label: "规格数量：", grow: true, minChars: 6 }]
     }));
   });
 
@@ -209,6 +300,8 @@
   deletePageButton.addEventListener("click", deleteCurrentPage);
   printButton.addEventListener("click", exportPdf);
   batchPrintButton.addEventListener("click", batchExportPdf);
+  exportPptxButton.addEventListener("click", exportPptx);
+  batchExportPptxButton.addEventListener("click", batchExportPptx);
   newFileButton.addEventListener("click", newProject);
   openFileButton.addEventListener("click", openProjectFile);
   saveFileButton.addEventListener("click", saveProject);
@@ -235,6 +328,24 @@
   feishuPanelToggle.addEventListener("click", () => {
     setFeishuPanelCollapsed(!feishuPanel.classList.contains("is-collapsed"), { persist: true });
   });
+  Object.entries(globalEditButtons).forEach(([action, button]) => {
+    if (button) {
+      button.addEventListener("click", () => handleGlobalEditCommand(action));
+    }
+  });
+  if (globalColorPresetList) {
+    buildColorPresetButtons(globalColorPresetList, (color) => handleGlobalColorChange(color));
+  }
+  if (globalFontSizeInput) {
+    globalFontSizeInput.addEventListener("input", () => handleGlobalFontSizeChange(globalFontSizeInput.value));
+    globalFontSizeInput.addEventListener("change", () => updateGlobalFontSizeControlFromSelection());
+  }
+  if (globalFontDecreaseButton) {
+    globalFontDecreaseButton.addEventListener("click", () => adjustSelectedGlobalFontSize(-1));
+  }
+  if (globalFontIncreaseButton) {
+    globalFontIncreaseButton.addEventListener("click", () => adjustSelectedGlobalFontSize(1));
+  }
   bomPickFileButton.addEventListener("click", chooseBomFile);
   bomClosePreviewButton.addEventListener("click", closeBomPreview);
   bomPreviewCloseButton.addEventListener("click", closeBomPreview);
@@ -249,6 +360,9 @@
   document.addEventListener("keydown", handleDocumentKeyDown);
   document.addEventListener("focusin", handleMaterialFocus);
   document.addEventListener("click", handleMaterialDocumentClick);
+  window.addEventListener("pointermove", handleGlobalPointerMove);
+  window.addEventListener("pointerup", endGlobalDrag);
+  window.addEventListener("pointercancel", endGlobalDrag);
   window.addEventListener("load", schedulePreviewScaleUpdate);
   window.addEventListener("afterprint", restorePendingBatchPrint);
 
@@ -291,10 +405,25 @@
       text,
       className,
       autoPage: Boolean(options.autoPage),
+      editable: options.editable === undefined ? text === "" : Boolean(options.editable),
+      fields: normalizeTextCellFields(options.fields),
       materialIndex: Number.isInteger(options.materialIndex) ? options.materialIndex : null,
       materialField: options.materialField || "",
       cellKey: options.cellKey || `c${col}r${row}`
     };
+  }
+
+  function normalizeTextCellFields(fields) {
+    if (!Array.isArray(fields) || !fields.length) return [];
+    return fields.map((field, index) => {
+      return {
+        key: field.key || `field${index + 1}`,
+        label: field.label || "",
+        value: field.value || "",
+        grow: Boolean(field.grow),
+        minChars: Number(field.minChars) || 0
+      };
+    });
   }
 
   function imageCell(col, row, colSpan, rowSpan, options = {}) {
@@ -307,7 +436,7 @@
       material: Boolean(options.material),
       materialIndex: Number.isInteger(options.materialIndex) ? options.materialIndex : null,
       logo: Boolean(options.logo),
-      fit: options.fit || "cover",
+      fit: options.fit || (options.material ? "contain" : "cover"),
       accept: options.accept || "image/*",
       label: options.label || "插入图片",
       cellKey: options.cellKey || `c${col}r${row}`
@@ -362,6 +491,8 @@
     const page = document.createElement("article");
     page.className = "sop-page";
     page.dataset.pageId = String(pageId);
+    page._globalAnnotationModels = [];
+    page._globalTextModels = [];
     const scale = document.createElement("div");
     scale.className = "sop-scale";
     const sheet = document.createElement("div");
@@ -377,9 +508,23 @@
         sheet.appendChild(cell);
       });
 
+    sheet.appendChild(buildGlobalOverlay(page));
     scale.appendChild(sheet);
     page.appendChild(scale);
+    renderGlobalPageOverlays(page);
     return page;
+  }
+
+  function buildGlobalOverlay(page) {
+    const overlay = document.createElement("div");
+    overlay.className = "global-overlay";
+    overlay.dataset.pageId = page.dataset.pageId;
+    const svg = buildAnnotationLayer("global-annotation-layer");
+    const textLayer = document.createElement("div");
+    textLayer.className = "global-text-layer";
+    overlay.append(svg, textLayer);
+    overlay.addEventListener("pointerdown", (event) => handleGlobalOverlayPointerDown(event, page));
+    return overlay;
   }
 
   function buildTextCell(definition) {
@@ -390,15 +535,153 @@
       cell.dataset.materialField = definition.materialField;
       cell.dataset.materialIndex = String(definition.materialIndex);
     }
-    cell.textContent = definition.text;
     if (definition.autoPage) {
+      cell.textContent = definition.text;
       cell.dataset.role = "page-number";
       cell.setAttribute("aria-live", "polite");
-    } else {
+    } else if (definition.fields && definition.fields.length) {
+      cell.dataset.editableCell = "true";
+      cell.dataset.fieldMode = "fields";
+      definition.fields.forEach((field, index) => {
+        cell.appendChild(buildEditableTextField(field, index));
+      });
+    } else if (definition.editable) {
+      cell.dataset.editableCell = "true";
+      cell.textContent = definition.text;
       cell.contentEditable = "true";
       cell.spellcheck = false;
+    } else {
+      cell.textContent = definition.text;
     }
     return cell;
+  }
+
+  function buildEditableTextField(field, index) {
+    const group = document.createElement("span");
+    group.className = "editable-cell-field";
+    group.dataset.fieldKey = field.key || `field${index + 1}`;
+    if (field.grow) {
+      group.dataset.grow = "true";
+    }
+
+    const label = document.createElement("span");
+    label.className = "editable-cell-label";
+    label.textContent = field.label || "";
+
+    const value = document.createElement("span");
+    value.className = "editable-cell-value";
+    value.dataset.fieldKey = group.dataset.fieldKey;
+    value.contentEditable = "true";
+    value.spellcheck = false;
+    value.textContent = field.value || "";
+    if (field.minChars) {
+      value.style.setProperty("--field-min-chars", String(field.minChars));
+    }
+
+    group.append(label, value);
+    return group;
+  }
+
+  function isEditableTextCell(cell) {
+    return Boolean(cell && cell.dataset && cell.dataset.editableCell === "true");
+  }
+
+  function getEditableTextCells(page) {
+    return Array.from(page.querySelectorAll(".text-cell[data-editable-cell='true']"));
+  }
+
+  function getTextCellValueElement(cell, fieldKey = "") {
+    if (!cell) return null;
+    if (fieldKey) {
+      return cell.querySelector(`.editable-cell-value[data-field-key="${cssEscape(fieldKey)}"]`);
+    }
+    return cell.querySelector(".editable-cell-value");
+  }
+
+  function getTextCellPersistedText(cell) {
+    if (!cell) return "";
+    return cell.textContent || "";
+  }
+
+  function getTextCellFieldValues(cell) {
+    if (!cell || cell.dataset.fieldMode !== "fields") return null;
+    return Array.from(cell.querySelectorAll(".editable-cell-value")).map((valueElement) => {
+      return {
+        key: valueElement.dataset.fieldKey || "",
+        text: valueElement.textContent || ""
+      };
+    });
+  }
+
+  function applySavedTextCell(cell, savedCell) {
+    if (!cell || !savedCell) return;
+    if (cell.dataset.fieldMode === "fields") {
+      applySavedTextCellFields(cell, savedCell);
+      return;
+    }
+    cell.textContent = savedCell.text || "";
+  }
+
+  function applySavedTextCellFields(cell, savedCell) {
+    const valueElements = Array.from(cell.querySelectorAll(".editable-cell-value"));
+    if (!valueElements.length) return;
+
+    if (Array.isArray(savedCell.values) && savedCell.values.length) {
+      const valuesByKey = new Map(savedCell.values.map((item) => [item.key, item]));
+      valueElements.forEach((valueElement, index) => {
+        const savedValue = valuesByKey.get(valueElement.dataset.fieldKey || "") || savedCell.values[index];
+        valueElement.textContent = savedValue ? savedValue.text || "" : "";
+      });
+      return;
+    }
+
+    const parsedValues = parseSavedFieldValues(cell, savedCell.text || "");
+    valueElements.forEach((valueElement, index) => {
+      valueElement.textContent = parsedValues[index] || "";
+    });
+  }
+
+  function parseSavedFieldValues(cell, savedText) {
+    const text = String(savedText || "");
+    const labels = Array.from(cell.querySelectorAll(".editable-cell-label")).map((label) => label.textContent || "");
+    if (!labels.length || !text) return labels.map(() => "");
+
+    const matches = labels.map((label) => findLabelInText(text, label));
+    if (matches.every((match) => match.index < 0)) {
+      return labels.length === 1 ? [text.trim()] : labels.map(() => "");
+    }
+
+    return labels.map((label, index) => {
+      const match = matches[index];
+      if (match.index < 0) return "";
+      const start = match.index + match.length;
+      const next = matches.slice(index + 1).find((item) => item.index >= 0 && item.index >= start);
+      const end = next ? next.index : text.length;
+      return text.slice(start, end).trim();
+    });
+  }
+
+  function findLabelInText(text, label) {
+    const exactIndex = text.indexOf(label);
+    if (exactIndex >= 0) {
+      return { index: exactIndex, length: label.length };
+    }
+    const trimmedLabel = label.trim();
+    if (!trimmedLabel) {
+      return { index: -1, length: 0 };
+    }
+    const trimmedIndex = text.indexOf(trimmedLabel);
+    return {
+      index: trimmedIndex,
+      length: trimmedIndex >= 0 ? trimmedLabel.length : 0
+    };
+  }
+
+  function cssEscape(value) {
+    if (window.CSS && typeof window.CSS.escape === "function") {
+      return window.CSS.escape(value);
+    }
+    return String(value).replace(/["\\]/g, "\\$&");
   }
 
   function buildImageSlot(definition) {
@@ -610,15 +893,57 @@
     toolbar.className = "image-editor-toolbar";
     editor.buttons.crop = buildEditorButton("crop", "剪裁拖动图片");
     editor.buttons.text = buildEditorButton("text", "添加文字");
+    editor.buttons.bubble = buildEditorButton("bubble", "气泡文本");
     editor.buttons.circle = buildEditorButton("circle", "圆圈");
     editor.buttons.rect = buildEditorButton("rect", "矩形");
     editor.buttons.arrow = buildEditorButton("arrow", "箭头");
     editor.buttons.reset = buildEditorButton("reset", "图片复位");
     editor.buttons.delete = buildEditorButton("delete", "删除所选");
     editor.buttons.done = buildEditorButton("done", "完成");
+    const colorControl = document.createElement("div");
+    colorControl.className = "editor-color-control";
+    colorControl.setAttribute("aria-label", "预设颜色");
+    const colorLabel = document.createElement("span");
+    colorLabel.textContent = "颜色";
+    const colorPresetList = document.createElement("div");
+    colorPresetList.className = "preset-color-list";
+    buildColorPresetButtons(colorPresetList, (color) => handleEditorColorChange(color));
+    colorControl.append(colorLabel, colorPresetList);
+    editor.colorPresetList = colorPresetList;
+
+    const fontControl = document.createElement("label");
+    fontControl.className = "editor-font-control";
+    const fontLabel = document.createElement("span");
+    fontLabel.textContent = "字号";
+    const fontDecreaseButton = document.createElement("button");
+    fontDecreaseButton.type = "button";
+    fontDecreaseButton.className = "editor-font-step-button";
+    fontDecreaseButton.setAttribute("aria-label", "减小字号");
+    fontDecreaseButton.textContent = "-";
+    const fontSizeInput = document.createElement("input");
+    fontSizeInput.type = "number";
+    fontSizeInput.min = String(GLOBAL_TEXT_FONT_MIN);
+    fontSizeInput.max = String(GLOBAL_TEXT_FONT_MAX);
+    fontSizeInput.step = "1";
+    fontSizeInput.inputMode = "numeric";
+    fontSizeInput.disabled = true;
+    fontSizeInput.setAttribute("aria-label", "文字字号");
+    const fontIncreaseButton = document.createElement("button");
+    fontIncreaseButton.type = "button";
+    fontIncreaseButton.className = "editor-font-step-button";
+    fontIncreaseButton.setAttribute("aria-label", "增大字号");
+    fontIncreaseButton.textContent = "+";
+    fontControl.append(fontLabel, fontDecreaseButton, fontSizeInput, fontIncreaseButton);
+    editor.fontSizeInput = fontSizeInput;
+    editor.fontDecreaseButton = fontDecreaseButton;
+    editor.fontIncreaseButton = fontIncreaseButton;
+
     toolbar.append(
       editor.buttons.crop,
+      colorControl,
+      fontControl,
       editor.buttons.text,
+      editor.buttons.bubble,
       editor.buttons.circle,
       editor.buttons.rect,
       editor.buttons.arrow,
@@ -634,6 +959,10 @@
     Object.entries(editor.buttons).forEach(([action, button]) => {
       button.addEventListener("click", () => handleEditorCommand(action));
     });
+    fontSizeInput.addEventListener("input", () => handleEditorFontSizeChange(fontSizeInput.value));
+    fontSizeInput.addEventListener("change", () => updateEditorFontSizeControlFromSelection());
+    fontDecreaseButton.addEventListener("click", () => adjustSelectedEditorFontSize(-1));
+    fontIncreaseButton.addEventListener("click", () => adjustSelectedEditorFontSize(1));
 
     stage.addEventListener("pointerdown", handleEditorStagePointerDown);
     stage.addEventListener("wheel", handleEditorWheel, { passive: false });
@@ -663,12 +992,12 @@
     const popover = document.createElement("section");
     popover.className = "material-search-popover";
     popover.hidden = true;
-    popover.setAttribute("aria-label", "物料编号搜索");
+    popover.setAttribute("aria-label", "物料搜索");
 
     const input = document.createElement("input");
     input.className = "material-search-input";
     input.type = "search";
-    input.placeholder = "搜索或输入物料编号";
+    input.placeholder = "搜索或输入物料编号/名称";
     input.autocomplete = "off";
 
     const status = document.createElement("div");
@@ -682,10 +1011,11 @@
     document.body.appendChild(popover);
 
     input.addEventListener("input", () => {
-      if (activeMaterialNumberCell) {
-        setMaterialFieldValue(activeMaterialNumberCell, "number", input.value);
+      if (activeMaterialSearchCell) {
+        const field = getMaterialSearchField(activeMaterialSearchCell);
+        setMaterialFieldValue(activeMaterialSearchCell, field, input.value);
         markDirty();
-        applyExactBomMatch(activeMaterialNumberCell);
+        applyExactBomMatch(activeMaterialSearchCell);
       }
       renderMaterialSearchResults(input.value);
     });
@@ -693,8 +1023,8 @@
       if (event.key === "Enter") {
         event.preventDefault();
         const first = getFilteredBomItems(input.value)[0];
-        if (first && activeMaterialNumberCell) {
-          applyBomItemToMaterial(activeMaterialNumberCell, first);
+        if (first && activeMaterialSearchCell) {
+          applyBomItemToMaterial(activeMaterialSearchCell, first);
           hideMaterialSearch();
         }
       } else if (event.key === "Escape") {
@@ -710,14 +1040,14 @@
   }
 
   function handleMaterialFocus(event) {
-    const cell = getMaterialNumberCell(event.target);
+    const cell = getMaterialSearchCell(event.target);
     if (cell) {
       showMaterialSearch(cell);
     }
   }
 
   function handleMaterialDocumentClick(event) {
-    const cell = getMaterialNumberCell(event.target);
+    const cell = getMaterialSearchCell(event.target);
     if (cell) {
       showMaterialSearch(cell);
       return;
@@ -726,26 +1056,34 @@
     hideMaterialSearch();
   }
 
-  function getMaterialNumberCell(target) {
-    const cell = target && target.closest ? target.closest(".text-cell[data-material-field='number']") : null;
-    return cell && cell.isContentEditable ? cell : null;
+  function getMaterialSearchCell(target) {
+    const cell = target && target.closest ?
+      target.closest(".text-cell[data-material-field='number'], .text-cell[data-material-field='name']") :
+      null;
+    return cell && isEditableTextCell(cell) ? cell : null;
   }
 
   function showMaterialSearch(cell) {
-    activeMaterialNumberCell = cell;
+    activeMaterialSearchCell = cell;
     if (!materialSearch.popover) return;
 
-    materialSearch.input.value = getMaterialFieldValue(cell, "number");
+    const field = getMaterialSearchField(cell);
+    materialSearch.input.placeholder = field === "name" ? "搜索或输入物料名称" : "搜索或输入物料编号";
+    materialSearch.input.value = getMaterialFieldValue(cell, field);
     renderMaterialSearchResults(materialSearch.input.value);
     materialSearch.popover.hidden = false;
     positionMaterialSearch(cell);
   }
 
   function hideMaterialSearch() {
-    activeMaterialNumberCell = null;
+    activeMaterialSearchCell = null;
     if (materialSearch.popover) {
       materialSearch.popover.hidden = true;
     }
+  }
+
+  function getMaterialSearchField(cell) {
+    return cell && cell.dataset.materialField === "name" ? "name" : "number";
   }
 
   function positionMaterialSearch(cell) {
@@ -774,7 +1112,9 @@
     if (!items.length) {
       const empty = document.createElement("div");
       empty.className = "library-empty";
-      empty.textContent = "没有匹配的物料编号";
+      empty.textContent = activeMaterialSearchCell && getMaterialSearchField(activeMaterialSearchCell) === "name" ?
+        "没有匹配的物料名称" :
+        "没有匹配的物料编号";
       materialSearch.list.appendChild(empty);
       return;
     }
@@ -783,14 +1123,19 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "material-search-option";
-      const code = document.createElement("strong");
-      code.textContent = item.code || "";
-      const name = document.createElement("span");
-      name.textContent = [item.name, item.spec].filter(Boolean).join(" · ") || "未命名物料";
-      button.append(code, name);
+      const primary = document.createElement("strong");
+      const detail = document.createElement("span");
+      if (activeMaterialSearchCell && getMaterialSearchField(activeMaterialSearchCell) === "name") {
+        primary.textContent = item.name || "未命名物料";
+        detail.textContent = [item.code, item.spec].filter(Boolean).join(" · ") || "无物料编号";
+      } else {
+        primary.textContent = item.code || "";
+        detail.textContent = [item.name, item.spec].filter(Boolean).join(" · ") || "未命名物料";
+      }
+      button.append(primary, detail);
       button.addEventListener("click", () => {
-        if (activeMaterialNumberCell) {
-          applyBomItemToMaterial(activeMaterialNumberCell, item);
+        if (activeMaterialSearchCell) {
+          applyBomItemToMaterial(activeMaterialSearchCell, item);
         }
         hideMaterialSearch();
       });
@@ -811,26 +1156,31 @@
 
   function applyExactBomMatch(cell) {
     if (!libraryState.activeBom || !Array.isArray(libraryState.activeBom.items)) return;
-    const code = normalizeSearchText(getMaterialFieldValue(cell, "number"));
-    if (!code) return;
-    const match = libraryState.activeBom.items.find((item) => normalizeSearchText(item.code) === code);
+    const field = getMaterialSearchField(cell);
+    const value = normalizeSearchText(getMaterialFieldValue(cell, field));
+    if (!value) return;
+    const match = libraryState.activeBom.items.find((item) => {
+      const target = field === "name" ? item.name : item.code;
+      return normalizeSearchText(target) === value;
+    });
     if (match) {
       applyBomItemToMaterial(cell, match, { keepSearchOpen: true });
     }
   }
 
-  function applyBomItemToMaterial(numberCell, item, options = {}) {
-    const index = numberCell.dataset.materialIndex;
-    const page = numberCell.closest(".sop-page");
+  function applyBomItemToMaterial(sourceCell, item, options = {}) {
+    const index = sourceCell.dataset.materialIndex;
+    const page = sourceCell.closest(".sop-page");
     if (!page || index === undefined) return;
 
+    const numberCell = page.querySelector(`.text-cell[data-material-index="${index}"][data-material-field="number"]`);
     const nameCell = page.querySelector(`.text-cell[data-material-index="${index}"][data-material-field="name"]`);
     const specCell = page.querySelector(`.text-cell[data-material-index="${index}"][data-material-field="spec"]`);
     const imageSlot = page.querySelector(`.image-cell[data-material-index="${index}"]`);
 
-    setMaterialFieldValue(numberCell, "number", item.code || "");
+    if (numberCell) setMaterialFieldValue(numberCell, "number", item.code || "");
     if (nameCell) setMaterialFieldValue(nameCell, "name", item.name || "");
-    if (specCell && item.spec) setMaterialFieldValue(specCell, "spec", item.spec);
+    if (specCell) setMaterialFieldValue(specCell, "spec", item.spec || "");
     if (imageSlot && item.imageSrc) {
       loadImageSource(imageSlot, item.imageSrc, { keepOverlays: false });
     }
@@ -840,11 +1190,15 @@
     if (!options.keepSearchOpen) {
       hideMaterialSearch();
     } else {
-      renderMaterialSearchResults(getMaterialFieldValue(numberCell, "number"));
+      renderMaterialSearchResults(getMaterialFieldValue(sourceCell, getMaterialSearchField(sourceCell)));
     }
   }
 
   function getMaterialFieldValue(cell, field) {
+    const valueElement = getTextCellValueElement(cell);
+    if (valueElement) {
+      return (valueElement.textContent || "").trim();
+    }
     const text = cell ? cell.textContent || "" : "";
     const prefix = getMaterialFieldPrefix(field);
     return text.startsWith(prefix) ? text.slice(prefix.length).trim() : text.trim();
@@ -852,6 +1206,11 @@
 
   function setMaterialFieldValue(cell, field, value) {
     if (!cell) return;
+    const valueElement = getTextCellValueElement(cell);
+    if (valueElement) {
+      valueElement.textContent = String(value || "").trim();
+      return;
+    }
     cell.textContent = `${getMaterialFieldPrefix(field)}${String(value || "").trim()}`;
   }
 
@@ -869,8 +1228,8 @@
       setEditorMode("crop");
       return;
     }
-    if (action === "text") {
-      addEditorText();
+    if (action === "text" || action === "bubble") {
+      addEditorText(action);
       return;
     }
     if (["circle", "rect", "arrow"].includes(action)) {
@@ -909,6 +1268,7 @@
     editor.drag = null;
     editor.overlay.hidden = false;
     document.body.classList.add("editor-open");
+    updateEditorColorInputFromSelection();
     setEditorMode(isLogoSlot(slot) ? "select" : "crop");
 
     requestAnimationFrame(() => {
@@ -1014,6 +1374,7 @@
       const shape = createAnnotationElement(model, ratio, markerId);
       shape.classList.add("editor-annotation-shape");
       shape.dataset.overlayId = model.id;
+      applyAnnotationColor(shape, model);
       if (editor.selected && editor.selected.kind === "annotation" && editor.selected.id === model.id) {
         shape.classList.add("is-selected");
       }
@@ -1035,8 +1396,19 @@
     const ratio = editor.ratio;
     editor.textLayer.replaceChildren();
     editor.slot._textModels.forEach((model) => {
+      normalizeEditorTextModel(model, editor.slot);
+      const isBubble = model.type === "bubble";
+      const isSelected = editor.selected && editor.selected.kind === "text" && editor.selected.id === model.id;
+
+      if (isBubble) {
+        editor.textLayer.appendChild(buildEditorBubbleShape(model, ratio));
+        const tailHandle = buildEditorBubbleTailHandle(model, ratio);
+        tailHandle.classList.toggle("is-selected", isSelected);
+        editor.textLayer.appendChild(tailHandle);
+      }
+
       const box = document.createElement("div");
-      box.className = "editor-text-box";
+      box.className = `editor-text-box ${isBubble ? "is-bubble" : ""}`.trim();
       box.dataset.overlayId = model.id;
       box.style.left = `${model.x * ratio}px`;
       box.style.top = `${model.y * ratio}px`;
@@ -1044,7 +1416,8 @@
       box.style.height = `${model.height * ratio}px`;
       box.style.fontSize = `${getTextFontSize(model) * ratio}px`;
       box.style.padding = `${Math.max(2, 3 * ratio)}px ${Math.max(3, 5 * ratio)}px`;
-      if (editor.selected && editor.selected.kind === "text" && editor.selected.id === model.id) {
+      applyTextBoxColor(box, model);
+      if (isSelected) {
         box.classList.add("is-selected");
       }
       box.addEventListener("pointerdown", (event) => {
@@ -1074,6 +1447,13 @@
       moveHandle.setAttribute("aria-label", "移动文字");
       moveHandle.addEventListener("pointerdown", (event) => startTextMove(event, model.id));
 
+      const dragHandle = document.createElement("button");
+      dragHandle.type = "button";
+      dragHandle.className = "editor-text-drag-handle";
+      dragHandle.title = "按住移动位置";
+      dragHandle.setAttribute("aria-label", "按住移动位置");
+      dragHandle.addEventListener("pointerdown", (event) => startTextMove(event, model.id));
+
       const resizeHandle = document.createElement("button");
       resizeHandle.type = "button";
       resizeHandle.className = "editor-text-resize-handle";
@@ -1081,7 +1461,7 @@
       resizeHandle.setAttribute("aria-label", "缩放文字框");
       resizeHandle.addEventListener("pointerdown", (event) => startTextResize(event, model.id));
 
-      box.append(content, moveHandle, resizeHandle);
+      box.append(content, moveHandle, dragHandle, resizeHandle);
       editor.textLayer.appendChild(box);
     });
   }
@@ -1094,6 +1474,55 @@
         box.dataset.overlayId === String(editor.selected.id);
       box.classList.toggle("is-selected", Boolean(isSelected));
     });
+    editor.textLayer.querySelectorAll(".editor-bubble-tail-handle").forEach((handle) => {
+      const isSelected = editor.selected &&
+        editor.selected.kind === "text" &&
+        handle.dataset.overlayId === String(editor.selected.id);
+      handle.classList.toggle("is-selected", Boolean(isSelected));
+    });
+  }
+
+  function normalizeEditorTextModel(model, slot) {
+    if (!model) return;
+    model.type = model.type === "bubble" ? "bubble" : "text";
+    if (model.type !== "bubble") return;
+
+    const currentFontSize = getTextFontSize(model);
+    const shouldUseReadableDefault = model.customFontSize !== true && currentFontSize < 16;
+    model.fontSize = normalizeGlobalTextFontSize(shouldUseReadableDefault ? 18 : currentFontSize, 18);
+
+    const width = slot ? slot.clientWidth : PPT_GRID_WIDTH;
+    const height = slot ? slot.clientHeight : PPT_GRID_HEIGHT;
+    if (!Number.isFinite(Number(model.tailX)) || !Number.isFinite(Number(model.tailY))) {
+      model.tailX = roundCoordinate(Number(model.x || 0) + Number(model.width || 0) * 0.78);
+      model.tailY = roundCoordinate(Number(model.y || 0) + Number(model.height || 0) + 20);
+    }
+    model.tailX = roundCoordinate(clamp(Number(model.tailX) || 0, 0, width));
+    model.tailY = roundCoordinate(clamp(Number(model.tailY) || 0, 0, height));
+  }
+
+  function buildEditorBubbleShape(model, ratio) {
+    return buildBubbleShapeSvg(
+      model,
+      editor.slot.clientWidth,
+      editor.slot.clientHeight,
+      "editor-bubble-tail-svg",
+      "editor-bubble-shape"
+    );
+  }
+
+  function buildEditorBubbleTailHandle(model, ratio) {
+    const geometry = getBubbleTailGeometry(model, editor.slot.clientWidth, editor.slot.clientHeight);
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "editor-bubble-tail-handle";
+    handle.dataset.overlayId = model.id;
+    handle.title = "拖动改变气泡箭头方向";
+    handle.setAttribute("aria-label", "拖动改变气泡箭头方向");
+    handle.style.left = `${geometry.tip.x * ratio}px`;
+    handle.style.top = `${geometry.tip.y * ratio}px`;
+    handle.addEventListener("pointerdown", (event) => startEditorBubbleTailResize(event, model.id));
+    return handle;
   }
 
   function clearSvgOverlay(svg) {
@@ -1122,13 +1551,258 @@
         ry: 2 * ratio
       });
     }
-    return createSvgElement("line", {
-      x1: model.x1 * ratio,
-      y1: model.y1 * ratio,
-      x2: model.x2 * ratio,
-      y2: model.y2 * ratio,
-      "marker-end": `url(#${markerId})`
+    ensureArrowControlPoint(model);
+    const x1 = model.x1 * ratio;
+    const y1 = model.y1 * ratio;
+    const controlX = model.controlX * ratio;
+    const controlY = model.controlY * ratio;
+    const x2 = model.x2 * ratio;
+    const y2 = model.y2 * ratio;
+    const group = createSvgElement("g", {});
+    const curve = createSvgElement("path", {
+      d: `M ${roundCoordinate(x1)} ${roundCoordinate(y1)} Q ${roundCoordinate(controlX)} ${roundCoordinate(controlY)} ${roundCoordinate(x2)} ${roundCoordinate(y2)}`
     });
+    const head = createSvgElement("polygon", {
+      points: getArrowHeadPoints(controlX, controlY, x2, y2, ratio)
+    });
+    curve.classList.add("annotation-arrow-curve");
+    head.classList.add("annotation-arrow-head");
+    group.append(curve, head);
+    return group;
+  }
+
+  function ensureArrowControlPoint(model) {
+    if (!model || model.type !== "arrow") return;
+    if (Number.isFinite(Number(model.controlX)) && Number.isFinite(Number(model.controlY))) return;
+    model.controlX = roundCoordinate((Number(model.x1 || 0) + Number(model.x2 || 0)) / 2);
+    model.controlY = roundCoordinate((Number(model.y1 || 0) + Number(model.y2 || 0)) / 2);
+  }
+
+  function getArrowHeadPoints(x1, y1, x2, y2, ratio) {
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const length = Math.max(10, 13 * ratio);
+    const width = Math.max(7, 9 * ratio);
+    const baseX = x2 - Math.cos(angle) * length;
+    const baseY = y2 - Math.sin(angle) * length;
+    const perpX = Math.cos(angle + Math.PI / 2) * width / 2;
+    const perpY = Math.sin(angle + Math.PI / 2) * width / 2;
+    return [
+      `${roundCoordinate(x2)},${roundCoordinate(y2)}`,
+      `${roundCoordinate(baseX + perpX)},${roundCoordinate(baseY + perpY)}`,
+      `${roundCoordinate(baseX - perpX)},${roundCoordinate(baseY - perpY)}`
+    ].join(" ");
+  }
+
+  function applyAnnotationColor(element, model) {
+    const color = getOverlayColor(model);
+    element.style.stroke = color;
+    element.style.color = color;
+    const arrowHead = element.querySelector && element.querySelector(".annotation-arrow-head");
+    if (arrowHead) {
+      arrowHead.style.fill = color;
+      arrowHead.style.stroke = color;
+    }
+  }
+
+  function applyTextBoxColor(box, model) {
+    const color = getOverlayColor(model);
+    box.style.setProperty("--overlay-color", color);
+    box.style.color = color;
+    box.style.borderColor = box.classList && box.classList.contains("is-bubble") ? "transparent" : color;
+  }
+
+  function getOverlayColor(model) {
+    return normalizeOverlayColor(model && model.color);
+  }
+
+  function normalizeOverlayColor(value) {
+    const text = String(value || "").trim();
+    if (/^#[0-9a-f]{6}$/i.test(text)) {
+      return text.toLowerCase();
+    }
+    if (/^#[0-9a-f]{3}$/i.test(text)) {
+      return `#${text[1]}${text[1]}${text[2]}${text[2]}${text[3]}${text[3]}`.toLowerCase();
+    }
+    return DEFAULT_OVERLAY_COLOR;
+  }
+
+  function setModelColor(model, color) {
+    if (model) {
+      model.color = normalizeOverlayColor(color);
+    }
+  }
+
+  function buildColorPresetButtons(container, onSelect) {
+    if (!container) return;
+    container.replaceChildren();
+    PRESET_OVERLAY_COLORS.forEach((preset) => {
+      const color = normalizeOverlayColor(preset.value);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "preset-color-button";
+      button.dataset.color = color;
+      button.title = preset.name;
+      button.setAttribute("aria-label", preset.name);
+      button.style.setProperty("--preset-color", color);
+      button.addEventListener("click", () => onSelect(color));
+      container.appendChild(button);
+    });
+    updateColorPresetSelection(container, DEFAULT_OVERLAY_COLOR);
+  }
+
+  function updateColorPresetSelection(container, color) {
+    if (!container) return;
+    const normalizedColor = normalizeOverlayColor(color);
+    container.querySelectorAll(".preset-color-button").forEach((button) => {
+      const active = normalizeOverlayColor(button.dataset.color) === normalizedColor;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  function getSelectedEditorModel() {
+    if (!editor.slot || !editor.selected) return null;
+    const models = editor.selected.kind === "annotation" ? editor.slot._annotationModels : editor.slot._textModels;
+    return findOverlayModel(models, editor.selected.id);
+  }
+
+  function handleEditorColorChange(color) {
+    editor.color = normalizeOverlayColor(color);
+    const model = getSelectedEditorModel();
+    if (model) {
+      setModelColor(model, editor.color);
+      markDirty();
+      renderSlotOverlays(editor.slot);
+      renderEditorOverlays();
+    }
+  }
+
+  function updateEditorColorInputFromSelection() {
+    const model = getSelectedEditorModel();
+    const color = getOverlayColor(model || { color: editor.color });
+    editor.color = color;
+    updateColorPresetSelection(editor.colorPresetList, color);
+  }
+
+  function handleEditorFontSizeChange(value) {
+    const model = getSelectedEditorModel();
+    if (!isSelectedEditorTextModel(model)) {
+      updateEditorFontSizeControlFromSelection();
+      return;
+    }
+
+    const nextFontSize = Number(value);
+    if (!Number.isFinite(nextFontSize)) return;
+
+    model.fontSize = normalizeGlobalTextFontSize(nextFontSize, getTextFontSize(model));
+    model.customFontSize = true;
+    markDirty();
+    renderSlotOverlays(editor.slot);
+    renderEditorTexts();
+    updateEditorFontSizeControlFromSelection();
+  }
+
+  function adjustSelectedEditorFontSize(delta) {
+    const model = getSelectedEditorModel();
+    if (!isSelectedEditorTextModel(model)) return;
+    handleEditorFontSizeChange(getTextFontSize(model) + delta);
+  }
+
+  function updateEditorFontSizeControlFromSelection() {
+    if (!editor.fontSizeInput) return;
+    const model = getSelectedEditorModel();
+    const enabled = isSelectedEditorTextModel(model);
+    editor.fontSizeInput.disabled = !enabled;
+    editor.fontSizeInput.value = enabled ? String(normalizeGlobalTextFontSize(getTextFontSize(model), 14)) : "";
+    if (editor.fontDecreaseButton) {
+      editor.fontDecreaseButton.disabled = !enabled;
+    }
+    if (editor.fontIncreaseButton) {
+      editor.fontIncreaseButton.disabled = !enabled;
+    }
+  }
+
+  function isSelectedEditorTextModel(model) {
+    return Boolean(model && editor.selected && editor.selected.kind === "text");
+  }
+
+  function getSelectedGlobalModel() {
+    const selected = globalEditor.selected;
+    if (!selected) return null;
+    const page = getPageById(selected.pageId);
+    if (!page) return null;
+    const models = selected.kind === "annotation" ? page._globalAnnotationModels : page._globalTextModels;
+    return findOverlayModel(models, selected.id);
+  }
+
+  function handleGlobalColorChange(color) {
+    globalEditor.color = normalizeOverlayColor(color);
+    const model = getSelectedGlobalModel();
+    if (!model) return;
+    setModelColor(model, globalEditor.color);
+    const page = getPageById(globalEditor.selected.pageId);
+    if (page) {
+      markDirty();
+      renderGlobalPageOverlays(page);
+    }
+  }
+
+  function updateGlobalColorInputFromSelection() {
+    const model = getSelectedGlobalModel();
+    const color = getOverlayColor(model || { color: globalEditor.color });
+    globalEditor.color = color;
+    updateColorPresetSelection(globalColorPresetList, color);
+  }
+
+  function handleGlobalFontSizeChange(value) {
+    const model = getSelectedGlobalModel();
+    if (!isSelectedGlobalTextModel(model)) {
+      updateGlobalFontSizeControlFromSelection();
+      return;
+    }
+
+    const nextFontSize = Number(value);
+    if (!Number.isFinite(nextFontSize)) return;
+
+    model.fontSize = normalizeGlobalTextFontSize(nextFontSize, getTextFontSize(model));
+    model.customFontSize = true;
+    const page = getPageById(globalEditor.selected.pageId);
+    if (page) {
+      markDirty();
+      renderGlobalPageOverlays(page);
+    }
+    updateGlobalFontSizeControlFromSelection();
+  }
+
+  function adjustSelectedGlobalFontSize(delta) {
+    const model = getSelectedGlobalModel();
+    if (!isSelectedGlobalTextModel(model)) return;
+    handleGlobalFontSizeChange(getTextFontSize(model) + delta);
+  }
+
+  function updateGlobalFontSizeControlFromSelection() {
+    if (!globalFontSizeInput) return;
+    const model = getSelectedGlobalModel();
+    const enabled = isSelectedGlobalTextModel(model);
+    globalFontSizeInput.disabled = !enabled;
+    globalFontSizeInput.value = enabled ? String(normalizeGlobalTextFontSize(getTextFontSize(model), 18)) : "";
+    if (globalFontDecreaseButton) {
+      globalFontDecreaseButton.disabled = !enabled;
+    }
+    if (globalFontIncreaseButton) {
+      globalFontIncreaseButton.disabled = !enabled;
+    }
+  }
+
+  function isSelectedGlobalTextModel(model) {
+    return Boolean(model && globalEditor.selected && globalEditor.selected.kind === "text");
+  }
+
+  function normalizeGlobalTextFontSize(value, fallback) {
+    const fontSize = Number(value);
+    const defaultSize = Number.isFinite(Number(fallback)) ? Number(fallback) : 18;
+    const nextSize = Number.isFinite(fontSize) ? fontSize : defaultSize;
+    return roundCoordinate(clamp(nextSize, GLOBAL_TEXT_FONT_MIN, GLOBAL_TEXT_FONT_MAX));
   }
 
   function addEditorAnnotationHandles(model) {
@@ -1147,7 +1821,9 @@
       addSvgHandle(model.id, "se", right, bottom, "nwse-resize");
       return;
     }
+    ensureArrowControlPoint(model);
     addSvgHandle(model.id, "start", model.x1, model.y1, "move");
+    addSvgHandle(model.id, "control", model.controlX, model.controlY, "grab");
     addSvgHandle(model.id, "end", model.x2, model.y2, "move");
   }
 
@@ -1172,17 +1848,24 @@
     editor.buttons.crop.disabled = !canCrop;
     editor.buttons.reset.disabled = !canCrop;
     editor.buttons.delete.disabled = !editor.selected;
+    if (editor.colorPresetList) {
+      editor.colorPresetList.querySelectorAll(".preset-color-button").forEach((button) => {
+        button.disabled = !hasSlot;
+      });
+    }
 
     Object.values(editor.buttons).forEach((button) => button.classList.remove("active"));
     if (editor.mode === "crop") {
       editor.buttons.crop.classList.add("active");
     }
     editor.stage.classList.toggle("is-crop-mode", editor.mode === "crop" && canCrop);
+    updateEditorColorInputFromSelection();
+    updateEditorFontSizeControlFromSelection();
   }
 
   function handleEditorStagePointerDown(event) {
     if (!editor.isOpen || !editor.slot || event.button !== 0) return;
-    if (event.target.closest(".editor-annotation-shape, .editor-resize-handle, .editor-text-box")) return;
+    if (event.target.closest(".editor-annotation-shape, .editor-resize-handle, .editor-text-box, .editor-bubble-tail-handle")) return;
 
     clearEditorSelection();
     if (editor.mode !== "crop" || isLogoSlot(editor.slot)) return;
@@ -1209,7 +1892,7 @@
     const rect = editor.stage.getBoundingClientRect();
     const pointerX = (event.clientX - rect.left) / editor.ratio;
     const pointerY = (event.clientY - rect.top) / editor.ratio;
-    const minScale = getCoverScale(slot);
+    const minScale = getMinimumImageScale(slot);
     const maxScale = minScale * 8;
     const previousScale = state.scale;
     const zoom = Math.exp(-event.deltaY * 0.001);
@@ -1265,6 +1948,11 @@
       if (!model) return;
       model.x = roundCoordinate(clamp(drag.origin.x + dx, 0, slot.clientWidth - drag.origin.width));
       model.y = roundCoordinate(clamp(drag.origin.y + dy, 0, slot.clientHeight - drag.origin.height));
+      if (model.type === "bubble") {
+        normalizeEditorTextModel(drag.origin, slot);
+        model.tailX = roundCoordinate(clamp(drag.origin.tailX + dx, 0, slot.clientWidth));
+        model.tailY = roundCoordinate(clamp(drag.origin.tailY + dy, 0, slot.clientHeight));
+      }
       renderSlotOverlays(slot);
       renderEditorTexts();
       syncEditorTextSelectionClasses();
@@ -1282,6 +1970,23 @@
       const fontScale = Math.min(widthScale, heightScale);
       const maxFontSize = Math.max(6, Math.min(72, model.height - 6));
       model.fontSize = roundCoordinate(clamp(getTextFontSize(drag.origin) * fontScale, 6, maxFontSize));
+      model.customFontSize = true;
+      if (model.type === "bubble") {
+        normalizeEditorTextModel(model, slot);
+      }
+      renderSlotOverlays(slot);
+      renderEditorTexts();
+      syncEditorTextSelectionClasses();
+      updateEditorFontSizeControlFromSelection();
+      return;
+    }
+
+    if (drag.type === "bubble-tail") {
+      const model = findOverlayModel(slot._textModels, drag.id);
+      if (!model || model.type !== "bubble") return;
+      const pointer = editorPointToSlot(event);
+      model.tailX = roundCoordinate(pointer.x);
+      model.tailY = roundCoordinate(pointer.y);
       renderSlotOverlays(slot);
       renderEditorTexts();
       syncEditorTextSelectionClasses();
@@ -1369,6 +2074,24 @@
     };
   }
 
+  function startEditorBubbleTailResize(event, id) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const model = findOverlayModel(editor.slot._textModels, id);
+    if (!model || model.type !== "bubble") return;
+
+    normalizeEditorTextModel(model, editor.slot);
+    selectEditorItem("text", id);
+    editor.drag = {
+      type: "bubble-tail",
+      id,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: cloneModel(model)
+    };
+  }
+
   function editorPointToSlot(event) {
     const rect = editor.stage.getBoundingClientRect();
     return {
@@ -1377,21 +2100,28 @@
     };
   }
 
-  function addEditorText() {
+  function addEditorText(type = "text") {
     const slot = editor.slot;
     const width = slot.clientWidth;
     const height = slot.clientHeight;
-    const boxWidth = clamp(width * 0.36, 48, width - 12);
-    const boxHeight = clamp(height * 0.16, 24, height - 12);
+    const isBubble = type === "bubble";
+    const boxWidth = isBubble ? clamp(width * 0.46, 72, width - 12) : clamp(width * 0.36, 48, width - 12);
+    const boxHeight = isBubble ? clamp(height * 0.24, 36, height - 12) : clamp(height * 0.16, 24, height - 12);
+    const x = roundCoordinate((width - boxWidth) / 2);
+    const y = roundCoordinate((height - boxHeight) / 2);
     const model = {
       id: newOverlayId(),
-      type: "text",
-      x: roundCoordinate((width - boxWidth) / 2),
-      y: roundCoordinate((height - boxHeight) / 2),
+      type: isBubble ? "bubble" : "text",
+      x,
+      y,
       width: roundCoordinate(boxWidth),
       height: roundCoordinate(boxHeight),
-      text: "文字",
-      fontSize: 14
+      text: isBubble ? "说明" : "文字",
+      fontSize: isBubble ? 18 : 14,
+      customFontSize: false,
+      tailX: isBubble ? roundCoordinate(clamp(x + boxWidth * 0.78, 0, width)) : undefined,
+      tailY: isBubble ? roundCoordinate(clamp(y + boxHeight + 20, 0, height)) : undefined,
+      color: editor.color
     };
 
     slot._textModels.push(model);
@@ -1422,7 +2152,8 @@
         type,
         cx: roundCoordinate(width / 2),
         cy: roundCoordinate(height / 2),
-        r: roundCoordinate(radius)
+        r: roundCoordinate(radius),
+        color: editor.color
       };
     } else if (type === "rect") {
       const rectWidth = clamp(width * 0.46, 36, width - 12);
@@ -1433,7 +2164,8 @@
         x: roundCoordinate((width - rectWidth) / 2),
         y: roundCoordinate((height - rectHeight) / 2),
         width: roundCoordinate(rectWidth),
-        height: roundCoordinate(rectHeight)
+        height: roundCoordinate(rectHeight),
+        color: editor.color
       };
     } else {
       model = {
@@ -1441,8 +2173,11 @@
         type: "arrow",
         x1: roundCoordinate(width * 0.25),
         y1: roundCoordinate(height * 0.65),
+        controlX: roundCoordinate(width * 0.5),
+        controlY: roundCoordinate(height * 0.5),
         x2: roundCoordinate(width * 0.75),
-        y2: roundCoordinate(height * 0.35)
+        y2: roundCoordinate(height * 0.35),
+        color: editor.color
       };
     }
 
@@ -1459,6 +2194,7 @@
     renderEditorAnnotations();
     syncEditorTextSelectionClasses();
     updateEditorButtons();
+    updateEditorColorInputFromSelection();
   }
 
   function clearEditorSelection() {
@@ -1501,14 +2237,17 @@
       return;
     }
 
-    const minX = Math.min(origin.x1, origin.x2);
-    const maxX = Math.max(origin.x1, origin.x2);
-    const minY = Math.min(origin.y1, origin.y2);
-    const maxY = Math.max(origin.y1, origin.y2);
+    ensureArrowControlPoint(origin);
+    const minX = Math.min(origin.x1, origin.x2, origin.controlX);
+    const maxX = Math.max(origin.x1, origin.x2, origin.controlX);
+    const minY = Math.min(origin.y1, origin.y2, origin.controlY);
+    const maxY = Math.max(origin.y1, origin.y2, origin.controlY);
     const clampedDx = clamp(dx, -minX, width - maxX);
     const clampedDy = clamp(dy, -minY, height - maxY);
     model.x1 = roundCoordinate(origin.x1 + clampedDx);
     model.y1 = roundCoordinate(origin.y1 + clampedDy);
+    model.controlX = roundCoordinate(origin.controlX + clampedDx);
+    model.controlY = roundCoordinate(origin.controlY + clampedDy);
     model.x2 = roundCoordinate(origin.x2 + clampedDx);
     model.y2 = roundCoordinate(origin.y2 + clampedDy);
   }
@@ -1550,6 +2289,9 @@
     if (handle === "start") {
       model.x1 = roundCoordinate(pointer.x);
       model.y1 = roundCoordinate(pointer.y);
+    } else if (handle === "control") {
+      model.controlX = roundCoordinate(pointer.x);
+      model.controlY = roundCoordinate(pointer.y);
     } else {
       model.x2 = roundCoordinate(pointer.x);
       model.y2 = roundCoordinate(pointer.y);
@@ -1567,13 +2309,26 @@
       const shape = createAnnotationElement(model, 1, markerId);
       shape.classList.add("annotation-shape");
       shape.dataset.overlayId = model.id;
+      applyAnnotationColor(shape, model);
       layer.appendChild(shape);
     });
 
     textLayer.replaceChildren();
     slot._textModels.forEach((model) => {
+      normalizeEditorTextModel(model, slot);
+      const isBubble = model.type === "bubble";
+      if (isBubble) {
+        textLayer.appendChild(buildBubbleShapeSvg(
+          model,
+          slot.clientWidth,
+          slot.clientHeight,
+          "slot-bubble-tail-svg",
+          "slot-bubble-shape"
+        ));
+      }
+
       const box = document.createElement("div");
-      box.className = "slot-text-box";
+      box.className = `slot-text-box ${isBubble ? "is-bubble" : ""}`.trim();
       box.dataset.overlayId = model.id;
       box.textContent = model.text;
       box.style.left = `${model.x}px`;
@@ -1581,8 +2336,709 @@
       box.style.width = `${model.width}px`;
       box.style.height = `${model.height}px`;
       box.style.fontSize = `${getTextFontSize(model)}px`;
+      applyTextBoxColor(box, model);
       textLayer.appendChild(box);
     });
+  }
+
+  function handleGlobalEditCommand(action) {
+    if (action === "delete") {
+      deleteSelectedGlobalItem();
+      return;
+    }
+
+    const page = getCurrentPage();
+    if (!page) return;
+
+    if (action === "text" || action === "bubble") {
+      addGlobalText(action);
+      return;
+    }
+
+    if (["circle", "rect", "arrow"].includes(action)) {
+      addGlobalAnnotation(action);
+    }
+  }
+
+  function setGlobalMode(mode) {
+    globalEditor.mode = mode;
+    updateGlobalEditState();
+  }
+
+  function updateGlobalEditState() {
+    getPages().forEach((page) => {
+      const sheet = getGlobalSheet(page);
+      if (sheet) {
+        sheet.classList.remove("global-edit-enabled");
+      }
+    });
+
+    Object.entries(globalEditButtons).forEach(([action, button]) => {
+      if (!button) return;
+      button.classList.remove("active");
+    });
+    if (globalEditButtons.delete) {
+      globalEditButtons.delete.disabled = !globalEditor.selected;
+    }
+    updateGlobalFontSizeControlFromSelection();
+  }
+
+  function renderGlobalPageOverlays(page) {
+    if (!page) return;
+    page._globalAnnotationModels = Array.isArray(page._globalAnnotationModels) ? page._globalAnnotationModels : [];
+    page._globalTextModels = Array.isArray(page._globalTextModels) ? page._globalTextModels : [];
+
+    const sheet = getGlobalSheet(page);
+    const overlay = getGlobalOverlay(page);
+    const layer = overlay && overlay.querySelector(".global-annotation-layer");
+    const textLayer = overlay && overlay.querySelector(".global-text-layer");
+    if (!sheet || !layer || !textLayer) return;
+
+    sheet.classList.remove("global-edit-enabled");
+    clearSvgOverlay(layer);
+    const markerId = layer.dataset.arrowMarkerId;
+    page._globalAnnotationModels.forEach((model) => {
+      const shape = createAnnotationElement(model, 1, markerId);
+      shape.classList.add("global-annotation-shape");
+      shape.dataset.overlayId = model.id;
+      applyAnnotationColor(shape, model);
+      if (isGlobalSelected(page, "annotation", model.id)) {
+        shape.classList.add("is-selected");
+      }
+      shape.addEventListener("pointerdown", (event) => startGlobalAnnotationMove(event, page, model.id));
+      layer.appendChild(shape);
+    });
+
+    if (globalEditor.selected && globalEditor.selected.kind === "annotation" && globalEditor.selected.pageId === page.dataset.pageId) {
+      const model = findOverlayModel(page._globalAnnotationModels, globalEditor.selected.id);
+      if (model) {
+        addGlobalAnnotationHandles(page, layer, model);
+      }
+    }
+
+    renderGlobalTexts(page, textLayer);
+    updateGlobalEditState();
+  }
+
+  function renderGlobalTexts(page, textLayer) {
+    textLayer.replaceChildren();
+    page._globalTextModels.forEach((model) => {
+      normalizeGlobalTextModel(model);
+      if (model.type === "bubble") {
+        textLayer.appendChild(buildGlobalBubbleTail(page, model));
+      }
+
+      const box = document.createElement("div");
+      box.className = `global-text-box ${model.type === "bubble" ? "is-bubble" : ""}`.trim();
+      box.dataset.overlayId = model.id;
+      box.style.left = `${model.x}px`;
+      box.style.top = `${model.y}px`;
+      box.style.width = `${model.width}px`;
+      box.style.height = `${model.height}px`;
+      box.style.fontSize = `${getTextFontSize(model)}px`;
+      applyTextBoxColor(box, model);
+      if (isGlobalSelected(page, "text", model.id)) {
+        box.classList.add("is-selected");
+      }
+      box.addEventListener("pointerdown", (event) => {
+        if (event.target === box) {
+          startGlobalTextMove(event, page, model.id);
+        }
+      });
+
+      const content = document.createElement("div");
+      content.className = "global-text-content";
+      content.contentEditable = "true";
+      content.spellcheck = false;
+      content.textContent = model.text || "";
+      content.addEventListener("pointerdown", (event) => {
+        event.stopPropagation();
+        selectGlobalItem(page, "text", model.id);
+      });
+      content.addEventListener("input", () => {
+        model.text = content.textContent || "";
+        markDirty();
+      });
+
+      const moveHandle = document.createElement("button");
+      moveHandle.type = "button";
+      moveHandle.className = "global-text-move-handle";
+      moveHandle.title = "移动";
+      moveHandle.setAttribute("aria-label", "移动");
+      moveHandle.addEventListener("pointerdown", (event) => startGlobalTextMove(event, page, model.id));
+
+      const dragHandle = document.createElement("button");
+      dragHandle.type = "button";
+      dragHandle.className = "global-text-drag-handle";
+      dragHandle.title = "按住移动位置";
+      dragHandle.setAttribute("aria-label", "按住移动位置");
+      dragHandle.addEventListener("pointerdown", (event) => startGlobalTextMove(event, page, model.id));
+
+      const resizeHandle = document.createElement("button");
+      resizeHandle.type = "button";
+      resizeHandle.className = "global-text-resize-handle";
+      resizeHandle.title = "缩放";
+      resizeHandle.setAttribute("aria-label", "缩放");
+      resizeHandle.addEventListener("pointerdown", (event) => startGlobalTextResize(event, page, model.id));
+
+      box.append(content, moveHandle, dragHandle, resizeHandle);
+      textLayer.appendChild(box);
+    });
+  }
+
+  function normalizeGlobalTextModel(model) {
+    if (!model) return;
+    if (model.type !== "bubble") return;
+    const currentFontSize = getTextFontSize(model);
+    const shouldUseReadableDefault = model.customFontSize !== true && currentFontSize < 22;
+    model.fontSize = normalizeGlobalTextFontSize(shouldUseReadableDefault ? 24 : currentFontSize, 24);
+    if (!Number.isFinite(Number(model.tailX)) || !Number.isFinite(Number(model.tailY))) {
+      model.tailX = roundCoordinate(Number(model.x || 0) + Number(model.width || 0) * 0.78);
+      model.tailY = roundCoordinate(Number(model.y || 0) + Number(model.height || 0) + 34);
+    }
+  }
+
+  function buildGlobalBubbleTail(page, model) {
+    normalizeGlobalTextModel(model);
+    const geometry = getBubbleTailGeometry(model);
+    const color = getOverlayColor(model);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("global-bubble-tail-svg");
+    svg.style.setProperty("--overlay-color", color);
+    svg.setAttribute("viewBox", `0 0 ${PPT_GRID_WIDTH} ${PPT_GRID_HEIGHT}`);
+    svg.setAttribute("aria-hidden", "true");
+
+    const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    shape.classList.add("global-bubble-shape");
+    shape.setAttribute("d", getBubbleShapePath(model, geometry));
+    shape.style.fill = "#ffffff";
+    shape.style.stroke = color;
+    svg.appendChild(shape);
+
+    const fragment = document.createDocumentFragment();
+    fragment.append(svg);
+
+    if (isGlobalSelected(page, "text", model.id)) {
+      const handle = document.createElement("button");
+      handle.type = "button";
+      handle.className = "global-bubble-tail-handle";
+      handle.title = "拖动改变气泡箭头方向";
+      handle.setAttribute("aria-label", "拖动改变气泡箭头方向");
+      handle.style.left = `${geometry.tip.x}px`;
+      handle.style.top = `${geometry.tip.y}px`;
+      handle.addEventListener("pointerdown", (event) => startGlobalBubbleTailResize(event, page, model.id));
+
+      fragment.append(handle);
+    }
+
+    return fragment;
+  }
+
+  function buildBubbleShapeSvg(model, boundsWidth, boundsHeight, svgClassName, shapeClassName) {
+    const width = Math.max(1, Number(boundsWidth) || 1);
+    const height = Math.max(1, Number(boundsHeight) || 1);
+    const geometry = getBubbleTailGeometry(model, width, height);
+    const color = getOverlayColor(model);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add(svgClassName);
+    svg.style.setProperty("--overlay-color", color);
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    svg.setAttribute("aria-hidden", "true");
+
+    const shape = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    shape.classList.add(shapeClassName);
+    shape.setAttribute("d", getBubbleShapePath(model, geometry));
+    shape.style.fill = "#ffffff";
+    shape.style.stroke = color;
+    svg.appendChild(shape);
+    return svg;
+  }
+
+  function getBubbleShapePath(model, geometry) {
+    const x = Number(model.x) || 0;
+    const y = Number(model.y) || 0;
+    const width = Math.max(1, Number(model.width) || 1);
+    const height = Math.max(1, Number(model.height) || 1);
+    const right = x + width;
+    const bottom = y + height;
+    const radius = roundCoordinate(clamp(Math.min(width, height) * 0.18, 8, 16));
+    const p1 = geometry.baseStart;
+    const p2 = geometry.baseEnd;
+    const tip = geometry.tip;
+    const commands = [];
+    const moveTo = (px, py) => commands.push(`M ${roundCoordinate(px)} ${roundCoordinate(py)}`);
+    const lineTo = (px, py) => commands.push(`L ${roundCoordinate(px)} ${roundCoordinate(py)}`);
+    const quadTo = (cx, cy, px, py) => commands.push(`Q ${roundCoordinate(cx)} ${roundCoordinate(cy)} ${roundCoordinate(px)} ${roundCoordinate(py)}`);
+
+    moveTo(x + radius, y);
+    if (geometry.baseSide === "top") {
+      lineTo(p1.x, y);
+      lineTo(tip.x, tip.y);
+      lineTo(p2.x, y);
+    }
+    lineTo(right - radius, y);
+    quadTo(right, y, right, y + radius);
+
+    if (geometry.baseSide === "right") {
+      lineTo(right, p1.y);
+      lineTo(tip.x, tip.y);
+      lineTo(right, p2.y);
+    }
+    lineTo(right, bottom - radius);
+    quadTo(right, bottom, right - radius, bottom);
+
+    if (geometry.baseSide === "bottom") {
+      lineTo(p2.x, bottom);
+      lineTo(tip.x, tip.y);
+      lineTo(p1.x, bottom);
+    }
+    lineTo(x + radius, bottom);
+    quadTo(x, bottom, x, bottom - radius);
+
+    if (geometry.baseSide === "left") {
+      lineTo(x, p2.y);
+      lineTo(tip.x, tip.y);
+      lineTo(x, p1.y);
+    }
+    lineTo(x, y + radius);
+    quadTo(x, y, x + radius, y);
+    commands.push("Z");
+    return commands.join(" ");
+  }
+
+  function getBubbleTailGeometry(model, boundsWidth = PPT_GRID_WIDTH, boundsHeight = PPT_GRID_HEIGHT) {
+    const x = Number(model.x) || 0;
+    const y = Number(model.y) || 0;
+    const width = Math.max(1, Number(model.width) || 1);
+    const height = Math.max(1, Number(model.height) || 1);
+    const maxX = Math.max(1, Number(boundsWidth) || PPT_GRID_WIDTH);
+    const maxY = Math.max(1, Number(boundsHeight) || PPT_GRID_HEIGHT);
+    const tip = {
+      x: clamp(Number(model.tailX) || x + width * 0.78, 0, maxX),
+      y: clamp(Number(model.tailY) || y + height + 34, 0, maxY)
+    };
+    const center = { x: x + width / 2, y: y + height / 2 };
+    const dx = tip.x - center.x;
+    const dy = tip.y - center.y;
+    const useHorizontalSide = Math.abs(dx / width) > Math.abs(dy / height);
+    const baseHalf = clamp(Math.min(width, height) * 0.16, 10, 22);
+    let p1;
+    let p2;
+    let baseSide;
+
+    if (useHorizontalSide) {
+      const rightSide = dx >= 0;
+      const baseX = rightSide ? x + width : x;
+      const baseY = clamp(tip.y, y + baseHalf + 4, y + height - baseHalf - 4);
+      p1 = { x: baseX, y: baseY - baseHalf };
+      p2 = { x: baseX, y: baseY + baseHalf };
+      baseSide = rightSide ? "right" : "left";
+    } else {
+      const bottomSide = dy >= 0;
+      const baseY = bottomSide ? y + height : y;
+      const baseX = clamp(tip.x, x + baseHalf + 4, x + width - baseHalf - 4);
+      p1 = { x: baseX - baseHalf, y: baseY };
+      p2 = { x: baseX + baseHalf, y: baseY };
+      baseSide = bottomSide ? "bottom" : "top";
+    }
+
+    return {
+      tip,
+      baseCenter: {
+        x: roundCoordinate((p1.x + p2.x) / 2),
+        y: roundCoordinate((p1.y + p2.y) / 2)
+      },
+      baseStart: { x: roundCoordinate(p1.x), y: roundCoordinate(p1.y) },
+      baseEnd: { x: roundCoordinate(p2.x), y: roundCoordinate(p2.y) },
+      baseSide,
+      baseOrientation: Math.abs(p1.y - p2.y) < 0.01 ? "horizontal" : "vertical",
+      points: [
+        { x: roundCoordinate(p1.x), y: roundCoordinate(p1.y) },
+        { x: roundCoordinate(p2.x), y: roundCoordinate(p2.y) },
+        { x: roundCoordinate(tip.x), y: roundCoordinate(tip.y) }
+      ]
+    };
+  }
+
+  function addGlobalAnnotationHandles(page, layer, model) {
+    if (model.type === "circle") {
+      addGlobalSvgHandle(page, layer, model.id, "radius", model.cx + model.r, model.cy, "ew-resize");
+      return;
+    }
+    if (model.type === "rect") {
+      const left = model.x;
+      const right = model.x + model.width;
+      const top = model.y;
+      const bottom = model.y + model.height;
+      addGlobalSvgHandle(page, layer, model.id, "nw", left, top, "nwse-resize");
+      addGlobalSvgHandle(page, layer, model.id, "ne", right, top, "nesw-resize");
+      addGlobalSvgHandle(page, layer, model.id, "sw", left, bottom, "nesw-resize");
+      addGlobalSvgHandle(page, layer, model.id, "se", right, bottom, "nwse-resize");
+      return;
+    }
+    ensureArrowControlPoint(model);
+    addGlobalSvgHandle(page, layer, model.id, "start", model.x1, model.y1, "move");
+    addGlobalSvgHandle(page, layer, model.id, "control", model.controlX, model.controlY, "grab");
+    addGlobalSvgHandle(page, layer, model.id, "end", model.x2, model.y2, "move");
+  }
+
+  function addGlobalSvgHandle(page, layer, id, handle, x, y, cursor) {
+    const circle = createSvgElement("circle", {
+      cx: x,
+      cy: y,
+      r: 7
+    });
+    circle.classList.add("global-resize-handle");
+    circle.dataset.overlayId = id;
+    circle.dataset.handle = handle;
+    circle.style.cursor = cursor;
+    circle.addEventListener("pointerdown", (event) => startGlobalAnnotationResize(event, page, id, handle));
+    layer.appendChild(circle);
+  }
+
+  function addGlobalText(type) {
+    const page = getCurrentPage();
+    const sheet = getGlobalSheet(page);
+    if (!page || !sheet) return;
+
+    const sheetWidth = sheet.clientWidth;
+    const sheetHeight = sheet.clientHeight;
+    const isBubble = type === "bubble";
+    const boxWidth = isBubble ? 260 : 220;
+    const boxHeight = isBubble ? 88 : 70;
+    const model = {
+      id: newOverlayId(),
+      type: isBubble ? "bubble" : "text",
+      x: roundCoordinate((sheetWidth - boxWidth) / 2),
+      y: roundCoordinate((sheetHeight - boxHeight) / 2),
+      width: boxWidth,
+      height: boxHeight,
+      text: isBubble ? "说明" : "文字",
+      fontSize: isBubble ? 24 : 18,
+      customFontSize: false,
+      tailX: isBubble ? roundCoordinate((sheetWidth - boxWidth) / 2 + boxWidth * 0.78) : undefined,
+      tailY: isBubble ? roundCoordinate((sheetHeight - boxHeight) / 2 + boxHeight + 34) : undefined,
+      color: globalEditor.color
+    };
+
+    page._globalTextModels.push(model);
+    setGlobalMode("select");
+    selectGlobalItem(page, "text", model.id);
+    markDirty();
+
+    requestAnimationFrame(() => {
+      const content = page.querySelector(`.global-text-box[data-overlay-id="${cssEscape(model.id)}"] .global-text-content`);
+      if (content) {
+        content.focus({ preventScroll: true });
+        selectTextContent(content);
+      }
+    });
+  }
+
+  function addGlobalAnnotation(type) {
+    const page = getCurrentPage();
+    const sheet = getGlobalSheet(page);
+    if (!page || !sheet) return;
+
+    const width = sheet.clientWidth;
+    const height = sheet.clientHeight;
+    let model;
+
+    if (type === "circle") {
+      model = {
+        id: newOverlayId(),
+        type,
+        cx: roundCoordinate(width / 2),
+        cy: roundCoordinate(height / 2),
+        r: 76,
+        color: globalEditor.color
+      };
+    } else if (type === "rect") {
+      const rectWidth = 300;
+      const rectHeight = 130;
+      model = {
+        id: newOverlayId(),
+        type,
+        x: roundCoordinate((width - rectWidth) / 2),
+        y: roundCoordinate((height - rectHeight) / 2),
+        width: rectWidth,
+        height: rectHeight,
+        color: globalEditor.color
+      };
+    } else {
+      model = {
+        id: newOverlayId(),
+        type: "arrow",
+        x1: roundCoordinate(width * 0.42),
+        y1: roundCoordinate(height * 0.6),
+        controlX: roundCoordinate(width * 0.5),
+        controlY: roundCoordinate(height * 0.51),
+        x2: roundCoordinate(width * 0.58),
+        y2: roundCoordinate(height * 0.42),
+        color: globalEditor.color
+      };
+    }
+
+    page._globalAnnotationModels.push(model);
+    setGlobalMode("select");
+    selectGlobalItem(page, "annotation", model.id);
+    markDirty();
+  }
+
+  function handleGlobalOverlayPointerDown(event, page) {
+    if (event.button !== 0) return;
+    if (event.target.closest(".global-annotation-shape, .global-resize-handle, .global-text-box, .global-bubble-tail-handle")) return;
+    event.preventDefault();
+    clearGlobalSelection();
+  }
+
+  function startGlobalAnnotationMove(event, page, id) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const model = findOverlayModel(page._globalAnnotationModels, id);
+    if (!model) return;
+    selectGlobalItem(page, "annotation", id);
+    beginGlobalDrag(event, page, {
+      type: "annotation-move",
+      id,
+      origin: cloneModel(model)
+    });
+  }
+
+  function startGlobalAnnotationResize(event, page, id, handle) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const model = findOverlayModel(page._globalAnnotationModels, id);
+    if (!model) return;
+    selectGlobalItem(page, "annotation", id);
+    beginGlobalDrag(event, page, {
+      type: "annotation-resize",
+      id,
+      handle,
+      origin: cloneModel(model)
+    });
+  }
+
+  function startGlobalTextMove(event, page, id) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const model = findOverlayModel(page._globalTextModels, id);
+    if (!model) return;
+    selectGlobalItem(page, "text", id);
+    beginGlobalDrag(event, page, {
+      type: "text-move",
+      id,
+      origin: cloneModel(model)
+    });
+  }
+
+  function startGlobalTextResize(event, page, id) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const model = findOverlayModel(page._globalTextModels, id);
+    if (!model) return;
+    selectGlobalItem(page, "text", id);
+    beginGlobalDrag(event, page, {
+      type: "text-resize",
+      id,
+      origin: cloneModel(model)
+    });
+  }
+
+  function startGlobalBubbleTailResize(event, page, id) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const model = findOverlayModel(page._globalTextModels, id);
+    if (!model || model.type !== "bubble") return;
+    normalizeGlobalTextModel(model);
+    selectGlobalItem(page, "text", id);
+    beginGlobalDrag(event, page, {
+      type: "bubble-tail",
+      id,
+      origin: cloneModel(model)
+    });
+  }
+
+  function beginGlobalDrag(event, page, drag) {
+    const overlay = getGlobalOverlay(page);
+    globalEditor.drag = {
+      ...drag,
+      pageId: page.dataset.pageId,
+      startPoint: globalPointToSheet(event, page)
+    };
+    if (overlay && overlay.setPointerCapture) {
+      overlay.setPointerCapture(event.pointerId);
+    }
+  }
+
+  function handleGlobalPointerMove(event) {
+    const drag = globalEditor.drag;
+    if (!drag) return;
+
+    const page = getPageById(drag.pageId);
+    const sheet = getGlobalSheet(page);
+    if (!page || !sheet) return;
+
+    const pointer = globalPointToSheet(event, page);
+    const dx = pointer.x - drag.startPoint.x;
+    const dy = pointer.y - drag.startPoint.y;
+
+    if (drag.type === "annotation-move") {
+      const model = findOverlayModel(page._globalAnnotationModels, drag.id);
+      if (!model) return;
+      moveAnnotationModel(sheet, model, drag.origin, dx, dy);
+      renderGlobalPageOverlays(page);
+      return;
+    }
+
+    if (drag.type === "annotation-resize") {
+      const model = findOverlayModel(page._globalAnnotationModels, drag.id);
+      if (!model) return;
+      resizeAnnotationModel(sheet, model, drag.origin, pointer, drag.handle);
+      renderGlobalPageOverlays(page);
+      return;
+    }
+
+    if (drag.type === "text-move") {
+      const model = findOverlayModel(page._globalTextModels, drag.id);
+      if (!model) return;
+      model.x = roundCoordinate(clamp(drag.origin.x + dx, 0, sheet.clientWidth - drag.origin.width));
+      model.y = roundCoordinate(clamp(drag.origin.y + dy, 0, sheet.clientHeight - drag.origin.height));
+      if (model.type === "bubble") {
+        normalizeGlobalTextModel(drag.origin);
+        model.tailX = roundCoordinate(clamp(drag.origin.tailX + dx, 0, sheet.clientWidth));
+        model.tailY = roundCoordinate(clamp(drag.origin.tailY + dy, 0, sheet.clientHeight));
+      }
+      renderGlobalPageOverlays(page);
+      return;
+    }
+
+    if (drag.type === "text-resize") {
+      const model = findOverlayModel(page._globalTextModels, drag.id);
+      if (!model) return;
+      model.width = roundCoordinate(clamp(pointer.x - drag.origin.x, 36, sheet.clientWidth - drag.origin.x));
+      model.height = roundCoordinate(clamp(pointer.y - drag.origin.y, 24, sheet.clientHeight - drag.origin.y));
+      const widthScale = model.width / Math.max(1, drag.origin.width);
+      const heightScale = model.height / Math.max(1, drag.origin.height);
+      const fontScale = Math.min(widthScale, heightScale);
+      const maxFontSize = Math.max(7, Math.min(96, model.height - 8));
+      const minFontSize = GLOBAL_TEXT_FONT_MIN;
+      model.fontSize = roundCoordinate(clamp(getTextFontSize(drag.origin) * fontScale, minFontSize, maxFontSize));
+      model.customFontSize = true;
+      if (model.type === "bubble") {
+        normalizeGlobalTextModel(model);
+      }
+      renderGlobalPageOverlays(page);
+      return;
+    }
+
+    if (drag.type === "bubble-tail") {
+      const model = findOverlayModel(page._globalTextModels, drag.id);
+      if (!model || model.type !== "bubble") return;
+      model.tailX = roundCoordinate(pointer.x);
+      model.tailY = roundCoordinate(pointer.y);
+      renderGlobalPageOverlays(page);
+    }
+  }
+
+  function endGlobalDrag(event) {
+    if (!globalEditor.drag) return;
+    const page = getPageById(globalEditor.drag.pageId);
+    const overlay = getGlobalOverlay(page);
+    if (overlay && overlay.hasPointerCapture && overlay.hasPointerCapture(event.pointerId)) {
+      overlay.releasePointerCapture(event.pointerId);
+    }
+    globalEditor.drag = null;
+    markDirty();
+  }
+
+  function selectGlobalItem(page, kind, id) {
+    const previousPage = globalEditor.selected ? getPageById(globalEditor.selected.pageId) : null;
+    globalEditor.selected = { pageId: page.dataset.pageId, kind, id };
+    if (previousPage && previousPage !== page) {
+      renderGlobalPageOverlays(previousPage);
+    }
+    renderGlobalPageOverlays(page);
+    updateGlobalColorInputFromSelection();
+    updateGlobalFontSizeControlFromSelection();
+    updateGlobalEditState();
+  }
+
+  function clearGlobalSelection() {
+    if (!globalEditor.selected) return;
+    const page = getPageById(globalEditor.selected.pageId);
+    globalEditor.selected = null;
+    if (page) {
+      renderGlobalPageOverlays(page);
+    }
+    updateGlobalColorInputFromSelection();
+    updateGlobalFontSizeControlFromSelection();
+    updateGlobalEditState();
+  }
+
+  function deleteSelectedGlobalItem() {
+    const selected = globalEditor.selected;
+    if (!selected) return;
+    const page = getPageById(selected.pageId);
+    if (!page) {
+      globalEditor.selected = null;
+      updateGlobalEditState();
+      return;
+    }
+
+    if (selected.kind === "annotation") {
+      page._globalAnnotationModels = page._globalAnnotationModels.filter((model) => model.id !== selected.id);
+    } else {
+      page._globalTextModels = page._globalTextModels.filter((model) => model.id !== selected.id);
+    }
+    globalEditor.selected = null;
+    markDirty();
+    renderGlobalPageOverlays(page);
+    updateGlobalColorInputFromSelection();
+    updateGlobalFontSizeControlFromSelection();
+    updateGlobalEditState();
+  }
+
+  function globalPointToSheet(event, page) {
+    const sheet = getGlobalSheet(page);
+    if (!sheet) return { x: 0, y: 0 };
+    const rect = sheet.getBoundingClientRect();
+    const scaleX = sheet.clientWidth / Math.max(1, rect.width);
+    const scaleY = sheet.clientHeight / Math.max(1, rect.height);
+    return {
+      x: roundCoordinate(clamp((event.clientX - rect.left) * scaleX, 0, sheet.clientWidth)),
+      y: roundCoordinate(clamp((event.clientY - rect.top) * scaleY, 0, sheet.clientHeight))
+    };
+  }
+
+  function isGlobalSelected(page, kind, id) {
+    return Boolean(globalEditor.selected &&
+      globalEditor.selected.pageId === page.dataset.pageId &&
+      globalEditor.selected.kind === kind &&
+      globalEditor.selected.id === id);
+  }
+
+  function getCurrentPage() {
+    const pages = getPages();
+    return pages.find((page) => page.dataset.pageId === currentPageId) || pages[0] || null;
+  }
+
+  function getPageById(pageId) {
+    if (!pageId) return null;
+    return getPages().find((page) => page.dataset.pageId === String(pageId)) || null;
+  }
+
+  function getGlobalSheet(page) {
+    return page ? page.querySelector(".sop-sheet") : null;
+  }
+
+  function getGlobalOverlay(page) {
+    return page ? page.querySelector(".global-overlay") : null;
   }
 
   function clearSlotOverlays(slot) {
@@ -1708,7 +3164,7 @@
     }
 
     const state = slot._imageState;
-    state.scale = getCoverScale(slot);
+    state.scale = getMinimumImageScale(slot);
     const scaledWidth = state.naturalWidth * state.scale;
     const scaledHeight = state.naturalHeight * state.scale;
     state.x = (slot.clientWidth - scaledWidth) / 2;
@@ -1749,11 +3205,29 @@
     return Math.max(slot.clientWidth / state.naturalWidth, slot.clientHeight / state.naturalHeight);
   }
 
+  function getContainScale(slot) {
+    const state = slot._imageState;
+    if (!state.naturalWidth || !state.naturalHeight) return 1;
+    return Math.min(slot.clientWidth / state.naturalWidth, slot.clientHeight / state.naturalHeight);
+  }
+
+  function getMinimumImageScale(slot) {
+    return shouldContainImageSlot(slot) ? getContainScale(slot) : getCoverScale(slot);
+  }
+
+  function shouldContainImageSlot(slot) {
+    return Boolean(slot && slot.dataset.fit === "contain");
+  }
+
+  function shouldResetSavedImagePlacement(slot, savedSlot) {
+    return shouldContainImageSlot(slot) && savedSlot && savedSlot.fit !== "contain";
+  }
+
   function clampImage(slot) {
     const state = slot._imageState;
     if (!state.naturalWidth || !state.naturalHeight || isLogoSlot(slot)) return;
 
-    const minScale = getCoverScale(slot);
+    const minScale = getMinimumImageScale(slot);
     state.scale = Math.max(state.scale, minScale);
 
     const scaledWidth = state.naturalWidth * state.scale;
@@ -1916,6 +3390,11 @@
         deleteSelectedEditorItem();
       }
     }
+
+    if (["Delete", "Backspace"].includes(event.key) && globalEditor.selected && !isTyping) {
+      event.preventDefault();
+      deleteSelectedGlobalItem();
+    }
   }
 
   function getPasteTarget(target) {
@@ -1963,15 +3442,19 @@
   }
 
   function handleDocumentInput(event) {
-    const editableCell = event.target.closest && event.target.closest(".sop-cell[contenteditable='true']");
+    const editableValue = event.target.closest && event.target.closest(".editable-cell-value[contenteditable='true']");
+    const editableCell = editableValue ?
+      editableValue.closest(".text-cell[data-editable-cell='true']") :
+      event.target.closest && event.target.closest(".sop-cell[contenteditable='true']");
     const editorText = event.target.closest && event.target.closest(".editor-text-content");
     if (editableCell || editorText) {
       markDirty();
     }
-    if (editableCell && editableCell.dataset.materialField === "number") {
-      activeMaterialNumberCell = editableCell;
+    if (editableCell && ["number", "name"].includes(editableCell.dataset.materialField)) {
+      activeMaterialSearchCell = editableCell;
       if (materialSearch.popover && !materialSearch.popover.hidden) {
-        materialSearch.input.value = getMaterialFieldValue(editableCell, "number");
+        const field = getMaterialSearchField(editableCell);
+        materialSearch.input.value = getMaterialFieldValue(editableCell, field);
         positionMaterialSearch(editableCell);
         renderMaterialSearchResults(materialSearch.input.value);
       }
@@ -2111,6 +3594,10 @@
 
   function downloadProjectFile(project, fileName) {
     const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
+    downloadBlob(blob, fileName);
+  }
+
+  function downloadBlob(blob, fileName) {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
@@ -2188,13 +3675,20 @@
     return getPages().map((page) => {
       return {
         pageNumber: Number(page.dataset.pageNumber) || 0,
-        textCells: Array.from(page.querySelectorAll(".text-cell[contenteditable='true']")).map((cell) => {
-          return {
+        textCells: getEditableTextCells(page).map((cell) => {
+          const values = getTextCellFieldValues(cell);
+          const entry = {
             key: cell.dataset.cellKey || "",
-            text: cell.textContent || ""
+            text: getTextCellPersistedText(cell)
           };
+          if (values) {
+            entry.values = values;
+          }
+          return entry;
         }),
-        imageSlots: Array.from(page.querySelectorAll(".image-cell")).map(serializeImageSlot)
+        imageSlots: Array.from(page.querySelectorAll(".image-cell")).map(serializeImageSlot),
+        globalAnnotations: (page._globalAnnotationModels || []).map(cloneModel),
+        globalTexts: (page._globalTextModels || []).map(cloneModel)
       };
     });
   }
@@ -2269,18 +3763,22 @@
       if (firstPage) {
         setCurrentPage(firstPage.dataset.pageId);
       }
+      updateGlobalEditState();
     } finally {
       isApplyingProject = false;
     }
   }
 
   async function applyPageData(page, pageData) {
+    page._globalAnnotationModels = (pageData.globalAnnotations || []).map(cloneModel);
+    page._globalTextModels = (pageData.globalTexts || []).map(cloneModel);
+
     const textByKey = new Map((pageData.textCells || []).map((cell) => [cell.key, cell]));
-    const textCells = Array.from(page.querySelectorAll(".text-cell[contenteditable='true']"));
+    const textCells = getEditableTextCells(page);
     textCells.forEach((cell, index) => {
       const savedCell = textByKey.get(cell.dataset.cellKey) || (pageData.textCells || [])[index];
       if (savedCell) {
-        cell.textContent = savedCell.text || "";
+        applySavedTextCell(cell, savedCell);
       }
     });
 
@@ -2293,6 +3791,8 @@
         await applyImageSlotData(slot, savedSlot);
       }
     }
+
+    renderGlobalPageOverlays(page);
   }
 
   async function applyImageSlotData(slot, savedSlot) {
@@ -2340,7 +3840,7 @@
     slot.dataset.hasImage = "true";
     slot.dataset.mediaKind = "image";
 
-    if (!savedSlot.imageState) {
+    if (!savedSlot.imageState || shouldResetSavedImagePlacement(slot, savedSlot)) {
       resetImageCover(slot);
     } else {
       clampImage(slot);
@@ -2470,15 +3970,26 @@
     nextPageId = 1;
     currentPageId = null;
     activeImageSlot = null;
+    globalEditor.selected = null;
+    globalEditor.drag = null;
     draggedPageId = null;
     nextAnnotationLayerId = 1;
     nextOverlayId = 1;
+    updateGlobalEditState();
   }
 
   function syncOverlayCounterFromPages() {
     let maxOverlayId = 0;
     document.querySelectorAll(".image-cell").forEach((slot) => {
       [...(slot._annotationModels || []), ...(slot._textModels || [])].forEach((model) => {
+        const match = String(model.id || "").match(/^overlay-(\d+)$/);
+        if (match) {
+          maxOverlayId = Math.max(maxOverlayId, Number(match[1]) || 0);
+        }
+      });
+    });
+    getPages().forEach((page) => {
+      [...(page._globalAnnotationModels || []), ...(page._globalTextModels || [])].forEach((model) => {
         const match = String(model.id || "").match(/^overlay-(\d+)$/);
         if (match) {
           maxOverlayId = Math.max(maxOverlayId, Number(match[1]) || 0);
@@ -2760,6 +4271,7 @@
     bomPickFileButton.disabled = !supportsFolderAccess && !window.FileReader;
     bomClosePreviewButton.disabled = !libraryState.activeBom && bomPreviewPanel.hidden;
     batchPrintButton.disabled = !libraryState.ready || libraryState.busy || !getVisibleLibraryDocuments().length;
+    batchExportPptxButton.disabled = !libraryState.ready || libraryState.busy || !getVisibleLibraryDocuments().length;
   }
 
   function renderLibraryFolders() {
@@ -3053,8 +4565,8 @@
     libraryState.activeBom = bom;
     openBomPreview(bom);
     renderBomHistory();
-    if (activeMaterialNumberCell) {
-      renderMaterialSearchResults(getMaterialFieldValue(activeMaterialNumberCell, "number"));
+    if (activeMaterialSearchCell) {
+      renderMaterialSearchResults(getMaterialFieldValue(activeMaterialSearchCell, getMaterialSearchField(activeMaterialSearchCell)));
     }
     libraryStatusEl.textContent = `已读取BOM：${removeBomExtension(bom.name)}，${bom.items.length} 个物料`;
   }
@@ -3565,13 +5077,24 @@
       applyBomItemToMaterial(numberCell, bom.items[0]);
       const page = numberCell.closest(".sop-page");
       const nameCell = page.querySelector(".text-cell[data-material-field='name'][data-material-index='0']");
+      const specCell = page.querySelector(".text-cell[data-material-field='spec'][data-material-index='0']");
       const imageSlot = page.querySelector(".image-cell[data-material-index='0']");
       const img = imageSlot.querySelector("img");
       await waitImageReady(img);
       await nextFrame();
 
+      setMaterialFieldValue(numberCell, "number", "");
+      setMaterialFieldValue(nameCell, "name", "测试物料");
+      setMaterialFieldValue(specCell, "spec", "");
+      deleteImage(imageSlot, { keepFocus: false });
+      applyExactBomMatch(nameCell);
+      const matchedImg = imageSlot.querySelector("img");
+      await waitImageReady(matchedImg);
+      await nextFrame();
+
       const passed = getMaterialFieldValue(numberCell, "number") === "MAT-001" &&
         getMaterialFieldValue(nameCell, "name") === "测试物料" &&
+        getMaterialFieldValue(specCell, "spec") === "2PCS" &&
         imageSlot.dataset.hasImage === "true" &&
         bomPreviewPanel.hidden === false &&
         appShellEl.classList.contains("bom-preview-open");
@@ -4406,6 +5929,901 @@
     });
   }
 
+  async function exportPptx() {
+    try {
+      ensurePptxExportReady();
+      const project = serializeProject({ includeHistory: false });
+      const baseName = removeProjectExtension(projectState.fileName || "未命名");
+      const blob = await createPptxBlob(project, baseName);
+      downloadBlob(blob, `${sanitizeLibraryName(baseName) || "SOP"}.pptx`);
+      libraryStatusEl.textContent = "已导出 PPT：表格、文字、图片和标注均尽量保留为可编辑对象。";
+    } catch (error) {
+      showFileError("导出PPT失败", error);
+    }
+  }
+
+  async function batchExportPptx() {
+    if (libraryState.busy) return;
+
+    try {
+      ensurePptxExportReady();
+      if (!await ensureLibraryAccess(true)) return;
+
+      const documents = await collectVisibleLibraryProjects("PPT");
+      if (!documents.length) {
+        libraryStatusEl.textContent = "当前筛选范围没有可批量导出的 SOP。";
+        updateLibraryControls();
+        return;
+      }
+
+      const scopeName = getBatchPrintScopeName();
+      const totalPages = documents.reduce((sum, documentItem) => sum + getProjectPageCount(documentItem.project), 0);
+      const ok = window.confirm(`将逐个导出“${scopeName}”中的 ${documents.length} 个 SOP，共 ${totalPages} 页。\n每个 SOP 会单独下载一个 .pptx 文件，不会合并。`);
+      if (!ok) return;
+
+      libraryState.busy = true;
+      updateLibraryControls();
+
+      for (let index = 0; index < documents.length; index += 1) {
+        const documentItem = documents[index];
+        const baseName = removeProjectExtension(documentItem.name || documentItem.fileName || `SOP-${index + 1}`);
+        const pageCount = getProjectPageCount(documentItem.project);
+        libraryStatusEl.textContent = `正在导出 PPT ${index + 1} / ${documents.length}：${baseName}（${pageCount} 页）`;
+        const blob = await createPptxBlob(documentItem.project, baseName);
+        downloadBlob(blob, `${sanitizeLibraryName(baseName) || `SOP-${index + 1}`}.pptx`);
+        await delay(220);
+      }
+
+      libraryStatusEl.textContent = `批量导出PPT已结束：${documents.length} 个 SOP，已分别下载 .pptx 文件。`;
+    } catch (error) {
+      showFileError("批量导出PPT失败", error);
+    } finally {
+      libraryState.busy = false;
+      updateLibraryControls();
+    }
+  }
+
+  function ensurePptxExportReady() {
+    if (!window.JSZip) {
+      throw new Error("PPT导出依赖 JSZip 未加载，请刷新页面后重试。");
+    }
+  }
+
+  async function collectVisibleLibraryProjects(label) {
+    const rawDocuments = getVisibleLibraryDocuments();
+    const currentProject = serializeProject({ includeHistory: true });
+    const documents = [];
+
+    for (const documentItem of rawDocuments) {
+      const shouldUseCurrentProject = isCurrentLibraryDocument(documentItem);
+      let project = shouldUseCurrentProject ? currentProject : documentItem.project;
+      if (!project && documentItem.source === STORAGE_MODE_FEISHU) {
+        libraryStatusEl.textContent = `正在读取飞书 SOP：${removeProjectExtension(documentItem.name)}（用于导出${label}）`;
+        project = await loadFeishuProject(documentItem);
+        documentItem.project = project;
+      }
+      if (project) {
+        documents.push({
+          ...documentItem,
+          project
+        });
+      }
+    }
+
+    return documents;
+  }
+
+  async function createPptxBlob(project, title) {
+    const zip = new JSZip();
+    const pages = Array.isArray(project && project.pages) && project.pages.length ? project.pages : [{}];
+    const media = [];
+    const slideInfos = [];
+
+    pages.forEach((pageData, index) => {
+      const slide = buildPptxSlide(pageData || {}, index + 1, pages.length, media);
+      slideInfos.push(slide);
+    });
+
+    addPptxPackageFiles(zip, slideInfos, media, title || "SOP");
+    return zip.generateAsync({
+      type: "blob",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      compression: "DEFLATE"
+    });
+  }
+
+  function buildPptxSlide(pageData, pageNumber, pageTotal, media) {
+    const rels = [{ id: "rId1", type: "slideLayout", target: "../slideLayouts/slideLayout1.xml" }];
+    let relIndex = 2;
+    let shapeId = 2;
+    const elements = [];
+    const textByKey = new Map((pageData.textCells || []).map((cell) => [cell.key, cell]));
+    const imageByKey = new Map((pageData.imageSlots || []).map((slot) => [slot.key, slot]));
+    let editableIndex = 0;
+    let imageIndex = 0;
+
+    const definitions = templateCells.slice().sort((a, b) => (a.row - b.row) || (a.col - b.col));
+    definitions.forEach((definition) => {
+      const box = getPptCellBox(definition);
+      if (definition.kind === "image") {
+        const savedSlot = imageByKey.get(definition.cellKey) || (pageData.imageSlots || [])[imageIndex];
+        imageIndex += 1;
+        addPptImageCell(elements, rels, media, definition, savedSlot, box, () => shapeId++, () => `rId${relIndex++}`);
+        return;
+      }
+
+      const editable = isPptEditableDefinition(definition);
+      const savedCell = editable ? textByKey.get(definition.cellKey) || (pageData.textCells || [])[editableIndex] : null;
+      if (editable) editableIndex += 1;
+      const text = getPptTextCellText(definition, savedCell, pageNumber, pageTotal);
+      addPptTextCell(elements, definition, box, text, shapeId++);
+    });
+
+    (pageData.globalAnnotations || []).forEach((model) => {
+      addPptAnnotation(elements, model, 0, 0, () => shapeId++);
+    });
+    (pageData.globalTexts || []).forEach((model) => {
+      addPptOverlayText(elements, model, 0, 0, () => shapeId++);
+    });
+
+    const xml = pptSlideXml(elements.join(""));
+    const relXml = pptRelationshipsXml(rels);
+    return { xml, relXml };
+  }
+
+  function addPptTextCell(elements, definition, box, text, shapeId) {
+    const style = getPptCellStyle(definition);
+    elements.push(pptShapeXml({
+      id: shapeId,
+      name: `Cell ${definition.cellKey}`,
+      preset: "rect",
+      x: box.x,
+      y: box.y,
+      w: box.w,
+      h: box.h,
+      fill: style.fill,
+      line: "111111",
+      lineWidth: 0.75,
+      text,
+      fontSize: style.fontSize,
+      bold: style.bold,
+      align: style.align,
+      color: "000000",
+      margin: 1.2
+    }));
+  }
+
+  function addPptImageCell(elements, rels, media, definition, savedSlot, box, nextShapeId, nextRelId) {
+    const style = getPptImageCellStyle(definition);
+    elements.push(pptShapeXml({
+      id: nextShapeId(),
+      name: `Image frame ${definition.cellKey}`,
+      preset: "rect",
+      x: box.x,
+      y: box.y,
+      w: box.w,
+      h: box.h,
+      fill: style.fill,
+      line: "111111",
+      lineWidth: 0.75,
+      text: "",
+      margin: 0
+    }));
+
+    if (!savedSlot || savedSlot.hasImage !== true) return;
+
+    if (savedSlot.mediaKind === "source" && savedSlot.sourceInfo) {
+      const label = `${savedSlot.sourceInfo.type || "SOURCE"}\n${savedSlot.sourceInfo.name || "logo source file"}`;
+      elements.push(pptShapeXml({
+        id: nextShapeId(),
+        name: `Logo source ${definition.cellKey}`,
+        preset: "rect",
+        x: box.x + 4,
+        y: box.y + 4,
+        w: Math.max(8, box.w - 8),
+        h: Math.max(8, box.h - 8),
+        fill: "FFFFFF",
+        line: "B7B7B7",
+        lineWidth: 0.6,
+        text: label,
+        fontSize: 10,
+        bold: true,
+        align: "center",
+        color: "111111"
+      }));
+      addPptImageCellBorder(elements, definition, box, nextShapeId);
+      return;
+    }
+
+    if (savedSlot.mediaKind !== "image" || !savedSlot.imageSrc) return;
+
+    const image = addPptMedia(media, savedSlot.imageSrc);
+    if (!image) return;
+
+    const relId = nextRelId();
+    rels.push({ id: relId, type: "image", target: `../media/${image.fileName}` });
+    const imageBox = getPptImagePlacement(definition, savedSlot, box);
+    elements.push(pptPictureXml({
+      id: nextShapeId(),
+      name: `Image ${definition.cellKey}`,
+      relId,
+      x: imageBox.x,
+      y: imageBox.y,
+      w: imageBox.w,
+      h: imageBox.h,
+      crop: imageBox.crop
+    }));
+    addPptImageCellBorder(elements, definition, box, nextShapeId);
+
+    (savedSlot.annotations || []).forEach((model) => {
+      addPptAnnotation(elements, model, box.gridX, box.gridY, nextShapeId);
+    });
+    (savedSlot.texts || []).forEach((model) => {
+      addPptOverlayText(elements, model, box.gridX, box.gridY, nextShapeId, {
+        boundsWidth: box.gridW,
+        boundsHeight: box.gridH,
+        context: "slot"
+      });
+    });
+  }
+
+  function addPptImageCellBorder(elements, definition, box, nextShapeId) {
+    elements.push(pptShapeXml({
+      id: nextShapeId(),
+      name: `Image border ${definition.cellKey}`,
+      preset: "rect",
+      x: box.x,
+      y: box.y,
+      w: box.w,
+      h: box.h,
+      fill: null,
+      line: "111111",
+      lineWidth: 0.75,
+      text: "",
+      margin: 0
+    }));
+  }
+
+  function addPptAnnotation(elements, model, baseGridX, baseGridY, nextShapeId) {
+    if (!model) return;
+    const color = colorToHex(getOverlayColor(model));
+    if (model.type === "circle") {
+      elements.push(pptShapeXml({
+        id: nextShapeId(),
+        name: "Circle annotation",
+        preset: "ellipse",
+        x: gridXToMm(baseGridX + model.cx - model.r),
+        y: gridYToMm(baseGridY + model.cy - model.r),
+        w: gridWidthToMm(model.r * 2),
+        h: gridHeightToMm(model.r * 2),
+        fill: null,
+        line: color,
+        lineWidth: 2.25
+      }));
+      return;
+    }
+    if (model.type === "rect") {
+      elements.push(pptShapeXml({
+        id: nextShapeId(),
+        name: "Rectangle annotation",
+        preset: "rect",
+        x: gridXToMm(baseGridX + model.x),
+        y: gridYToMm(baseGridY + model.y),
+        w: gridWidthToMm(model.width),
+        h: gridHeightToMm(model.height),
+        fill: null,
+        line: color,
+        lineWidth: 2.25
+      }));
+      return;
+    }
+    ensureArrowControlPoint(model);
+    elements.push(pptQuadraticArrowXml({
+      id: nextShapeId(),
+      name: "Arrow annotation",
+      x1: gridXToMm(baseGridX + model.x1),
+      y1: gridYToMm(baseGridY + model.y1),
+      controlX: gridXToMm(baseGridX + model.controlX),
+      controlY: gridYToMm(baseGridY + model.controlY),
+      x2: gridXToMm(baseGridX + model.x2),
+      y2: gridYToMm(baseGridY + model.y2),
+      color,
+      width: 2.25
+    }));
+  }
+
+  function addPptOverlayText(elements, model, baseGridX, baseGridY, nextShapeId, options = {}) {
+    if (!model) return;
+    if (options.context === "slot") {
+      normalizeEditorTextModel(model, {
+        clientWidth: options.boundsWidth || PPT_GRID_WIDTH,
+        clientHeight: options.boundsHeight || PPT_GRID_HEIGHT
+      });
+    } else {
+      normalizeGlobalTextModel(model);
+    }
+    const color = colorToHex(getOverlayColor(model));
+    const isBubble = model.type === "bubble";
+    elements.push(pptShapeXml({
+      id: nextShapeId(),
+      name: isBubble ? "Bubble text" : "Text annotation",
+      preset: isBubble ? "roundRect" : "rect",
+      x: gridXToMm(baseGridX + model.x),
+      y: gridYToMm(baseGridY + model.y),
+      w: gridWidthToMm(model.width),
+      h: gridHeightToMm(model.height),
+      fill: "FFFFFF",
+      line: color,
+      lineWidth: 1.4,
+      text: model.text || "",
+      fontSize: pxToPt(getTextFontSize(model)),
+      bold: true,
+      align: "center",
+      color,
+      margin: 1.4
+    }));
+    if (isBubble) {
+      const tail = getBubbleTailGeometry(
+        model,
+        options.boundsWidth || PPT_GRID_WIDTH,
+        options.boundsHeight || PPT_GRID_HEIGHT
+      );
+      elements.push(pptLineXml({
+        id: nextShapeId(),
+        name: "Bubble tail",
+        x1: gridXToMm(baseGridX + tail.baseCenter.x),
+        y1: gridYToMm(baseGridY + tail.baseCenter.y),
+        x2: gridXToMm(baseGridX + tail.tip.x),
+        y2: gridYToMm(baseGridY + tail.tip.y),
+        color,
+        width: 2,
+        arrow: false
+      }));
+    }
+  }
+
+  function addPptxPackageFiles(zip, slides, media, title) {
+    zip.file("[Content_Types].xml", pptContentTypesXml(slides.length));
+    zip.file("_rels/.rels", packageRelationshipsXml());
+    zip.file("docProps/core.xml", corePropertiesXml(title));
+    zip.file("docProps/app.xml", appPropertiesXml(slides.length));
+    zip.file("ppt/presentation.xml", presentationXml(slides.length));
+    zip.file("ppt/_rels/presentation.xml.rels", presentationRelationshipsXml(slides.length));
+    zip.file("ppt/slideMasters/slideMaster1.xml", slideMasterXml());
+    zip.file("ppt/slideMasters/_rels/slideMaster1.xml.rels", slideMasterRelationshipsXml());
+    zip.file("ppt/slideLayouts/slideLayout1.xml", slideLayoutXml());
+    zip.file("ppt/slideLayouts/_rels/slideLayout1.xml.rels", slideLayoutRelationshipsXml());
+    zip.file("ppt/theme/theme1.xml", themeXml());
+    slides.forEach((slide, index) => {
+      zip.file(`ppt/slides/slide${index + 1}.xml`, slide.xml);
+      zip.file(`ppt/slides/_rels/slide${index + 1}.xml.rels`, slide.relXml);
+    });
+    media.forEach((item) => {
+      zip.file(`ppt/media/${item.fileName}`, item.data, { base64: true });
+    });
+  }
+
+  function addPptMedia(media, dataUrl) {
+    const parsed = parseDataUrl(dataUrl);
+    if (!parsed) return null;
+    const extension = getPptImageExtension(parsed.mimeType);
+    const fileName = `image${media.length + 1}.${extension}`;
+    const item = {
+      fileName,
+      mimeType: parsed.mimeType,
+      data: parsed.base64
+    };
+    media.push(item);
+    return item;
+  }
+
+  function parseDataUrl(dataUrl) {
+    const match = String(dataUrl || "").match(/^data:([^;,]+)(;base64)?,(.*)$/i);
+    if (!match) return null;
+    const mimeType = match[1].toLowerCase();
+    const rawData = match[3] || "";
+    const base64 = match[2] ?
+      rawData.replace(/\s+/g, "") :
+      window.btoa(unescape(encodeURIComponent(decodeURIComponent(rawData))));
+    return { mimeType, base64 };
+  }
+
+  function getPptImageExtension(mimeType) {
+    if (mimeType === "image/jpeg") return "jpg";
+    if (mimeType === "image/png") return "png";
+    if (mimeType === "image/gif") return "gif";
+    if (mimeType === "image/bmp") return "bmp";
+    if (mimeType === "image/svg+xml") return "svg";
+    if (mimeType === "image/webp") return "webp";
+    return "png";
+  }
+
+  function getPptImagePlacement(definition, savedSlot, box) {
+    if (definition.logo || definition.fit === "contain") {
+      const state = savedSlot.imageState || {};
+      const naturalWidth = Number(state.naturalWidth) || box.gridW;
+      const naturalHeight = Number(state.naturalHeight) || box.gridH;
+      const inset = definition.logo ? 6 : 0;
+      const maxW = Math.max(1, box.gridW - inset * 2);
+      const maxH = Math.max(1, box.gridH - inset * 2);
+      const ratio = Math.min(maxW / naturalWidth, maxH / naturalHeight);
+      const gridW = naturalWidth * ratio;
+      const gridH = naturalHeight * ratio;
+      return {
+        x: gridXToMm(box.gridX + (box.gridW - gridW) / 2),
+        y: gridYToMm(box.gridY + (box.gridH - gridH) / 2),
+        w: gridWidthToMm(gridW),
+        h: gridHeightToMm(gridH),
+        crop: null
+      };
+    }
+
+    return {
+      x: box.x,
+      y: box.y,
+      w: box.w,
+      h: box.h,
+      crop: getPptImageCrop(savedSlot, box)
+    };
+  }
+
+  function getPptImageCrop(savedSlot, box) {
+    const state = savedSlot.imageState || {};
+    const naturalWidth = Number(state.naturalWidth) || 0;
+    const naturalHeight = Number(state.naturalHeight) || 0;
+    const scale = Number(state.scale) || 1;
+    if (!naturalWidth || !naturalHeight || !scale) return null;
+
+    const left = clamp((-Number(state.x || 0)) / scale, 0, naturalWidth);
+    const top = clamp((-Number(state.y || 0)) / scale, 0, naturalHeight);
+    const right = clamp((box.gridW - Number(state.x || 0)) / scale, 0, naturalWidth);
+    const bottom = clamp((box.gridH - Number(state.y || 0)) / scale, 0, naturalHeight);
+    return {
+      l: Math.round((left / naturalWidth) * 100000),
+      t: Math.round((top / naturalHeight) * 100000),
+      r: Math.round(((naturalWidth - right) / naturalWidth) * 100000),
+      b: Math.round(((naturalHeight - bottom) / naturalHeight) * 100000)
+    };
+  }
+
+  function getPptCellBox(definition) {
+    const gridX = getPptGridColumnStart(definition.col);
+    const gridY = getPptGridRowStart(definition.row);
+    const gridW = sumRange(PPT_COL_FRACTIONS, definition.col - 1, definition.colSpan);
+    const gridH = sumRange(PPT_ROW_FRACTIONS, definition.row - 1, definition.rowSpan);
+    return {
+      gridX,
+      gridY,
+      gridW,
+      gridH,
+      x: gridXToMm(gridX),
+      y: gridYToMm(gridY),
+      w: gridWidthToMm(gridW),
+      h: gridHeightToMm(gridH)
+    };
+  }
+
+  function getPptGridColumnStart(col) {
+    return sumRange(PPT_COL_FRACTIONS, 0, Math.max(0, col - 1));
+  }
+
+  function getPptGridRowStart(row) {
+    return sumRange(PPT_ROW_FRACTIONS, 0, Math.max(0, row - 1));
+  }
+
+  function sumRange(values, start, count) {
+    return values.slice(start, start + count).reduce((sum, value) => sum + value, 0);
+  }
+
+  function gridXToMm(value) {
+    return PPT_CONTENT_X_MM + (Number(value) || 0) / PPT_GRID_WIDTH * PPT_CONTENT_WIDTH_MM;
+  }
+
+  function gridYToMm(value) {
+    return PPT_CONTENT_Y_MM + (Number(value) || 0) / PPT_GRID_HEIGHT * PPT_CONTENT_HEIGHT_MM;
+  }
+
+  function gridWidthToMm(value) {
+    return (Number(value) || 0) / PPT_GRID_WIDTH * PPT_CONTENT_WIDTH_MM;
+  }
+
+  function gridHeightToMm(value) {
+    return (Number(value) || 0) / PPT_GRID_HEIGHT * PPT_CONTENT_HEIGHT_MM;
+  }
+
+  function isPptEditableDefinition(definition) {
+    return Boolean(!definition.autoPage && (definition.editable || (definition.fields && definition.fields.length)));
+  }
+
+  function getPptTextCellText(definition, savedCell, pageNumber, pageTotal) {
+    if (definition.autoPage) {
+      return `页码：${pageNumber} / ${pageTotal}`;
+    }
+    if (definition.fields && definition.fields.length) {
+      const values = getPptSavedFieldValues(definition, savedCell);
+      return definition.fields.map((field, index) => {
+        return `${field.label || ""}${values[index] || ""}`;
+      }).join("");
+    }
+    if (definition.editable) {
+      return savedCell ? savedCell.text || "" : definition.text || "";
+    }
+    return definition.text || "";
+  }
+
+  function getPptSavedFieldValues(definition, savedCell) {
+    if (savedCell && Array.isArray(savedCell.values) && savedCell.values.length) {
+      const valuesByKey = new Map(savedCell.values.map((item) => [item.key, item]));
+      return definition.fields.map((field, index) => {
+        const savedValue = valuesByKey.get(field.key) || savedCell.values[index];
+        return savedValue ? savedValue.text || "" : "";
+      });
+    }
+    if (savedCell && savedCell.text) {
+      return parseTextWithLabels(savedCell.text, definition.fields.map((field) => field.label || ""));
+    }
+    return definition.fields.map(() => "");
+  }
+
+  function parseTextWithLabels(text, labels) {
+    const content = String(text || "");
+    const matches = labels.map((label) => findLabelInText(content, label));
+    if (matches.every((match) => match.index < 0)) {
+      return labels.length === 1 ? [content.trim()] : labels.map(() => "");
+    }
+    return labels.map((label, index) => {
+      const match = matches[index];
+      if (match.index < 0) return "";
+      const start = match.index + match.length;
+      const next = matches.slice(index + 1).find((item) => item.index >= 0 && item.index >= start);
+      const end = next ? next.index : content.length;
+      return content.slice(start, end).trim();
+    });
+  }
+
+  function getPptCellStyle(definition) {
+    const className = definition.className || "";
+    if (className.includes("header-cell")) return { fill: "D9D9D9", bold: true, fontSize: 12, align: "left" };
+    if (className.includes("section-title")) return { fill: "EEEEEE", bold: true, fontSize: 13.5, align: "center" };
+    if (className.includes("note-cell")) return { fill: "FFF3C4", bold: true, fontSize: 9.75, align: "left" };
+    if (className.includes("footer-cell")) return { fill: "EEEEEE", bold: false, fontSize: 9, align: className.includes("center") ? "center" : "left" };
+    if (className.includes("blank-cell")) return { fill: "FAFAFA", bold: false, fontSize: 9, align: "left" };
+    return { fill: "FFFFFF", bold: className.includes("material-label") ? false : false, fontSize: 9, align: className.includes("center") ? "center" : "left" };
+  }
+
+  function getPptImageCellStyle(definition) {
+    return { fill: definition.logo ? "D9D9D9" : "FAFAFA" };
+  }
+
+  function pptShapeXml(options) {
+    const shapeId = options.id;
+    const text = options.text || "";
+    const hasText = text.length > 0;
+    const fillXml = options.fill ? pptSolidFillXml(options.fill) : "<a:noFill/>";
+    const lineXml = options.line ? pptLineXmlPart(options.line, options.lineWidth || 0.75) : "<a:ln><a:noFill/></a:ln>";
+    return `
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="${shapeId}" name="${xmlEscape(options.name || `Shape ${shapeId}`)}"/>
+          <p:cNvSpPr txBox="${hasText ? 1 : 0}"/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          ${pptXfrmXml(options.x, options.y, options.w, options.h)}
+          <a:prstGeom prst="${options.preset || "rect"}"><a:avLst/></a:prstGeom>
+          ${fillXml}
+          ${lineXml}
+        </p:spPr>
+        ${pptTextBodyXml(text, options)}
+      </p:sp>`;
+  }
+
+  function pptLineXml(options) {
+    const minX = Math.min(options.x1, options.x2);
+    const minY = Math.min(options.y1, options.y2);
+    const width = Math.max(0.1, Math.abs(options.x2 - options.x1));
+    const height = Math.max(0.1, Math.abs(options.y2 - options.y1));
+    const flipH = options.x2 < options.x1 ? ' flipH="1"' : "";
+    const flipV = options.y2 < options.y1 ? ' flipV="1"' : "";
+    const arrowXml = options.arrow ? '<a:tailEnd type="triangle"/>' : "";
+    return `
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="${options.id}" name="${xmlEscape(options.name || `Line ${options.id}`)}"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm${flipH}${flipV}>
+            <a:off x="${mmToEmu(minX)}" y="${mmToEmu(minY)}"/>
+            <a:ext cx="${mmToEmu(width)}" cy="${mmToEmu(height)}"/>
+          </a:xfrm>
+          <a:prstGeom prst="line"><a:avLst/></a:prstGeom>
+          <a:ln w="${ptToEmu(options.width || 2)}">
+            <a:solidFill><a:srgbClr val="${colorToHex(options.color)}"/></a:solidFill>
+            ${arrowXml}
+          </a:ln>
+        </p:spPr>
+        ${pptTextBodyXml("", {})}
+      </p:sp>`;
+  }
+
+  function pptQuadraticArrowXml(options) {
+    const minX = Math.min(options.x1, options.controlX, options.x2);
+    const minY = Math.min(options.y1, options.controlY, options.y2);
+    const width = Math.max(0.1, Math.max(options.x1, options.controlX, options.x2) - minX);
+    const height = Math.max(0.1, Math.max(options.y1, options.controlY, options.y2) - minY);
+    const widthEmu = mmToEmu(width);
+    const heightEmu = mmToEmu(height);
+    const localX = (value) => mmToEmu(value - minX);
+    const localY = (value) => mmToEmu(value - minY);
+
+    return `
+      <p:sp>
+        <p:nvSpPr>
+          <p:cNvPr id="${options.id}" name="${xmlEscape(options.name || `Curved arrow ${options.id}`)}"/>
+          <p:cNvSpPr/>
+          <p:nvPr/>
+        </p:nvSpPr>
+        <p:spPr>
+          <a:xfrm>
+            <a:off x="${mmToEmu(minX)}" y="${mmToEmu(minY)}"/>
+            <a:ext cx="${widthEmu}" cy="${heightEmu}"/>
+          </a:xfrm>
+          <a:custGeom>
+            <a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/>
+            <a:rect l="l" t="t" r="r" b="b"/>
+            <a:pathLst>
+              <a:path w="${widthEmu}" h="${heightEmu}">
+                <a:moveTo><a:pt x="${localX(options.x1)}" y="${localY(options.y1)}"/></a:moveTo>
+                <a:quadBezTo>
+                  <a:pt x="${localX(options.controlX)}" y="${localY(options.controlY)}"/>
+                  <a:pt x="${localX(options.x2)}" y="${localY(options.y2)}"/>
+                </a:quadBezTo>
+              </a:path>
+            </a:pathLst>
+          </a:custGeom>
+          <a:noFill/>
+          <a:ln w="${ptToEmu(options.width || 2)}">
+            <a:solidFill><a:srgbClr val="${colorToHex(options.color)}"/></a:solidFill>
+            <a:tailEnd type="triangle"/>
+          </a:ln>
+        </p:spPr>
+        ${pptTextBodyXml("", {})}
+      </p:sp>`;
+  }
+
+  function pptPictureXml(options) {
+    const crop = options.crop;
+    const cropXml = crop ? `<a:srcRect l="${clamp(crop.l, 0, 100000)}" t="${clamp(crop.t, 0, 100000)}" r="${clamp(crop.r, 0, 100000)}" b="${clamp(crop.b, 0, 100000)}"/>` : "";
+    return `
+      <p:pic>
+        <p:nvPicPr>
+          <p:cNvPr id="${options.id}" name="${xmlEscape(options.name || `Picture ${options.id}`)}"/>
+          <p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>
+          <p:nvPr/>
+        </p:nvPicPr>
+        <p:blipFill>
+          <a:blip r:embed="${options.relId}"/>
+          ${cropXml}
+          <a:stretch><a:fillRect/></a:stretch>
+        </p:blipFill>
+        <p:spPr>
+          ${pptXfrmXml(options.x, options.y, options.w, options.h)}
+          <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+        </p:spPr>
+      </p:pic>`;
+  }
+
+  function pptTextBodyXml(text, options = {}) {
+    const paragraphs = String(text || "").split(/\n/);
+    const fontSize = Math.max(1, Math.round((Number(options.fontSize) || 9) * 100));
+    const margin = mmToEmu(options.margin === undefined ? 0.8 : options.margin);
+    const align = options.align === "center" ? ' algn="ctr"' : "";
+    const bold = options.bold ? ' b="1"' : "";
+    const color = colorToHex(options.color || "000000");
+    const paragraphXml = (paragraphs.length ? paragraphs : [""]).map((line) => {
+      return `<a:p><a:pPr${align}/><a:r><a:rPr lang="zh-CN" sz="${fontSize}"${bold}><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/><a:cs typeface="Microsoft YaHei"/></a:rPr><a:t>${xmlEscape(line)}</a:t></a:r><a:endParaRPr lang="zh-CN" sz="${fontSize}"/></a:p>`;
+    }).join("");
+    return `
+      <p:txBody>
+        <a:bodyPr lIns="${margin}" tIns="${margin}" rIns="${margin}" bIns="${margin}" anchor="mid" wrap="square"/>
+        <a:lstStyle/>
+        ${paragraphXml}
+      </p:txBody>`;
+  }
+
+  function pptXfrmXml(x, y, w, h) {
+    return `<a:xfrm><a:off x="${mmToEmu(x)}" y="${mmToEmu(y)}"/><a:ext cx="${mmToEmu(w)}" cy="${mmToEmu(h)}"/></a:xfrm>`;
+  }
+
+  function pptSolidFillXml(color) {
+    return `<a:solidFill><a:srgbClr val="${colorToHex(color)}"/></a:solidFill>`;
+  }
+
+  function pptLineXmlPart(color, widthPt) {
+    return `<a:ln w="${ptToEmu(widthPt)}"><a:solidFill><a:srgbClr val="${colorToHex(color)}"/></a:solidFill></a:ln>`;
+  }
+
+  function pptSlideXml(shapeTreeXml) {
+    return xmlHeader() + `
+      <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+        <p:cSld>
+          <p:spTree>
+            <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+            <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+            ${shapeTreeXml}
+          </p:spTree>
+        </p:cSld>
+        <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+      </p:sld>`;
+  }
+
+  function pptRelationshipsXml(rels) {
+    return xmlHeader() + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels.map((rel) => {
+      const type = rel.type === "image" ?
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" :
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout";
+      return `<Relationship Id="${rel.id}" Type="${type}" Target="${xmlEscape(rel.target)}"/>`;
+    }).join("")}</Relationships>`;
+  }
+
+  function pptContentTypesXml(slideCount) {
+    const slideOverrides = Array.from({ length: slideCount }, (_, index) => {
+      return `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`;
+    }).join("");
+    return xmlHeader() + `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+      <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+      <Default Extension="xml" ContentType="application/xml"/>
+      <Default Extension="png" ContentType="image/png"/>
+      <Default Extension="jpg" ContentType="image/jpeg"/>
+      <Default Extension="jpeg" ContentType="image/jpeg"/>
+      <Default Extension="gif" ContentType="image/gif"/>
+      <Default Extension="bmp" ContentType="image/bmp"/>
+      <Default Extension="svg" ContentType="image/svg+xml"/>
+      <Default Extension="webp" ContentType="image/webp"/>
+      <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+      <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+      <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+      <Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
+      <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
+      <Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+      ${slideOverrides}
+    </Types>`;
+  }
+
+  function packageRelationshipsXml() {
+    return xmlHeader() + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+      <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+      <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+    </Relationships>`;
+  }
+
+  function presentationXml(slideCount) {
+    const slideIds = Array.from({ length: slideCount }, (_, index) => {
+      return `<p:sldId id="${256 + index}" r:id="rId${index + 2}"/>`;
+    }).join("");
+    return xmlHeader() + `<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+      <p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
+      <p:sldIdLst>${slideIds}</p:sldIdLst>
+      <p:sldSz cx="${mmToEmu(PPT_SLIDE_WIDTH_MM)}" cy="${mmToEmu(PPT_SLIDE_HEIGHT_MM)}" type="custom"/>
+      <p:notesSz cx="6858000" cy="9144000"/>
+    </p:presentation>`;
+  }
+
+  function presentationRelationshipsXml(slideCount) {
+    const slideRels = Array.from({ length: slideCount }, (_, index) => {
+      return `<Relationship Id="rId${index + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`;
+    }).join("");
+    return xmlHeader() + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
+      ${slideRels}
+    </Relationships>`;
+  }
+
+  function slideMasterXml() {
+    return xmlHeader() + `<p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+      <p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld>
+      <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>
+      <p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>
+      <p:txStyles><p:titleStyle/><p:bodyStyle/><p:otherStyle/></p:txStyles>
+    </p:sldMaster>`;
+  }
+
+  function slideMasterRelationshipsXml() {
+    return xmlHeader() + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+      <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
+    </Relationships>`;
+  }
+
+  function slideLayoutXml() {
+    return xmlHeader() + `<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank" preserve="1">
+      <p:cSld name="Blank"><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld>
+      <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+    </p:sldLayout>`;
+  }
+
+  function slideLayoutRelationshipsXml() {
+    return xmlHeader() + `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+    </Relationships>`;
+  }
+
+  function themeXml() {
+    return xmlHeader() + `<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="SOP">
+      <a:themeElements>
+        <a:clrScheme name="SOP"><a:dk1><a:srgbClr val="000000"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="1F2937"/></a:dk2><a:lt2><a:srgbClr val="F8FAFC"/></a:lt2><a:accent1><a:srgbClr val="2563EB"/></a:accent1><a:accent2><a:srgbClr val="EF1D1D"/></a:accent2><a:accent3><a:srgbClr val="10B981"/></a:accent3><a:accent4><a:srgbClr val="F59E0B"/></a:accent4><a:accent5><a:srgbClr val="7C3AED"/></a:accent5><a:accent6><a:srgbClr val="0EA5E9"/></a:accent6><a:hlink><a:srgbClr val="2563EB"/></a:hlink><a:folHlink><a:srgbClr val="7C3AED"/></a:folHlink></a:clrScheme>
+        <a:fontScheme name="SOP"><a:majorFont><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/><a:cs typeface="Microsoft YaHei"/></a:majorFont><a:minorFont><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/><a:cs typeface="Microsoft YaHei"/></a:minorFont></a:fontScheme>
+        <a:fmtScheme name="SOP"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme>
+      </a:themeElements>
+    </a:theme>`;
+  }
+
+  function corePropertiesXml(title) {
+    const now = new Date().toISOString();
+    return xmlHeader() + `<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <dc:title>${xmlEscape(title || "SOP")}</dc:title>
+      <dc:creator>SOP编辑器</dc:creator>
+      <cp:lastModifiedBy>SOP编辑器</cp:lastModifiedBy>
+      <dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created>
+      <dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified>
+    </cp:coreProperties>`;
+  }
+
+  function appPropertiesXml(slideCount) {
+    return xmlHeader() + `<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+      <Application>SOP编辑器</Application>
+      <PresentationFormat>A4 Landscape</PresentationFormat>
+      <Slides>${slideCount}</Slides>
+      <ScaleCrop>false</ScaleCrop>
+    </Properties>`;
+  }
+
+  function xmlHeader() {
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  }
+
+  function xmlEscape(value) {
+    return String(value === undefined || value === null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
+  function colorToHex(value) {
+    const text = String(value || "").trim();
+    if (/^[0-9a-f]{6}$/i.test(text)) {
+      return text.toUpperCase();
+    }
+    if (/^#[0-9a-f]{6}$/i.test(text)) {
+      return text.slice(1).toUpperCase();
+    }
+    if (/^#[0-9a-f]{3}$/i.test(text)) {
+      return normalizeOverlayColor(text).replace("#", "").toUpperCase();
+    }
+    return DEFAULT_OVERLAY_COLOR.replace("#", "").toUpperCase();
+  }
+
+  function pxToPt(value) {
+    return Math.max(1, (Number(value) || 12) * 0.75);
+  }
+
+  function mmToEmu(value) {
+    return Math.round((Number(value) || 0) * EMU_PER_MM);
+  }
+
+  function ptToEmu(value) {
+    return Math.round((Number(value) || 0) * 12700);
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
   function exportPdf() {
     window.print();
   }
@@ -4705,6 +7123,10 @@
     }
     if (activeImageSlot && page.contains(activeImageSlot)) {
       activeImageSlot = null;
+    }
+    if (globalEditor.selected && globalEditor.selected.pageId === page.dataset.pageId) {
+      globalEditor.selected = null;
+      globalEditor.drag = null;
     }
     page.remove();
     markDirty();
