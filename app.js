@@ -6,6 +6,9 @@
   const deletePageButton = document.getElementById("delete-page");
   const printButton = document.getElementById("print-pages");
   const batchPrintButton = document.getElementById("batch-print-pages");
+  const appShellEl = document.querySelector(".app-shell");
+  const libraryPanelEl = document.querySelector(".library-panel");
+  const libraryToggleButton = document.getElementById("library-toggle");
   const appVersionEl = document.getElementById("app-version");
   const fileStatusEl = document.getElementById("file-status");
   const newFileButton = document.getElementById("new-file");
@@ -23,21 +26,34 @@
   const librarySaveCurrentButton = document.getElementById("library-save-current");
   const libraryFolderListEl = document.getElementById("library-folder-list");
   const sopLibraryListEl = document.getElementById("sop-library-list");
+  const bomPickFileButton = document.getElementById("bom-pick-file");
+  const bomClosePreviewButton = document.getElementById("bom-close-preview");
+  const bomFileInput = document.getElementById("bom-file-input");
+  const bomHistoryListEl = document.getElementById("bom-history-list");
+  const bomPreviewPanel = document.getElementById("bom-preview-panel");
+  const bomPreviewTitle = document.getElementById("bom-preview-title");
+  const bomPreviewMeta = document.getElementById("bom-preview-meta");
+  const bomPreviewStatus = document.getElementById("bom-preview-status");
+  const bomPreviewTable = document.getElementById("bom-preview-table");
+  const bomPreviewCloseButton = document.getElementById("bom-preview-close");
 
-  const APP_VERSION = "1.1.0";
+  const APP_VERSION = "1.2.0";
   const SOP_SCHEMA_VERSION = 2;
   const SOP_FILE_TYPE = "sop-template-project";
   const LIBRARY_DB_NAME = "sop-template-library";
-  const LIBRARY_DB_VERSION = 2;
+  const LIBRARY_DB_VERSION = 3;
   const DEFAULT_FOLDER_ID = "root";
   const ALL_FOLDER_ID = "all";
   const ROOT_DIRECTORY_SETTING_KEY = "rootDirectory";
+  const BOM_HISTORY_LIMIT = 12;
   const displayableImageExtensions = [".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif", ".bmp", ".ico"];
   const logoSourceExtensions = [".ai", ".eps", ".pdf"];
+  const bomFileExtensions = [".xlsx", ".xls", ".csv", ".tsv", ".txt", ".json"];
 
   let nextPageId = 1;
   let currentPageId = null;
   let activeImageSlot = null;
+  let activeMaterialNumberCell = null;
   let draggedPageId = null;
   let nextAnnotationLayerId = 1;
   let nextOverlayId = 1;
@@ -65,8 +81,19 @@
     rootName: "",
     folders: [],
     documents: [],
+    boms: [],
+    bomHistory: [],
+    activeBom: null,
     activeFolderId: ALL_FOLDER_ID,
+    collapsed: false,
     busy: false
+  };
+
+  const materialSearch = {
+    popover: null,
+    input: null,
+    status: null,
+    list: null
   };
 
   const editor = {
@@ -138,10 +165,23 @@
   const materialRows = [3, 6, 9, 12, 15, 18, 21, 24];
   materialRows.forEach((row, index) => {
     const number = String(index + 1).padStart(2, "0");
-    templateCells.push(imageCell(1, row, 2, 3, { material: true, label: `${number}\n插入物料图片` }));
-    templateCells.push(textCell(3, row, 2, 1, "物料名称：", "material-label left"));
-    templateCells.push(textCell(3, row + 1, 2, 1, "物料编号：", "material-label left"));
-    templateCells.push(textCell(3, row + 2, 2, 1, "规格数量：", "material-label left"));
+    templateCells.push(imageCell(1, row, 2, 3, {
+      material: true,
+      materialIndex: index,
+      label: `${number}\n插入物料图片`
+    }));
+    templateCells.push(textCell(3, row, 2, 1, "物料名称：", "material-label left", {
+      materialIndex: index,
+      materialField: "name"
+    }));
+    templateCells.push(textCell(3, row + 1, 2, 1, "物料编号：", "material-label left", {
+      materialIndex: index,
+      materialField: "number"
+    }));
+    templateCells.push(textCell(3, row + 2, 2, 1, "规格数量：", "material-label left", {
+      materialIndex: index,
+      materialField: "spec"
+    }));
   });
 
   addPageButton.addEventListener("click", () => addPage({ scrollIntoView: true }));
@@ -159,6 +199,7 @@
   });
   versionSelect.addEventListener("dblclick", rollbackToSelectedVersion);
   openProjectInput.addEventListener("change", handleFallbackOpenFile);
+  libraryToggleButton.addEventListener("click", () => setLibraryCollapsed(!libraryState.collapsed));
   libraryPickFolderButton.addEventListener("click", pickLibraryFolder);
   libraryRefreshFolderButton.addEventListener("click", () => refreshLibrary({ requestPermission: true }));
   libraryNewFolderButton.addEventListener("click", createLibraryFolder);
@@ -166,9 +207,15 @@
     reason: "手动保存到SOP库",
     assignActiveFolder: true
   }));
+  bomPickFileButton.addEventListener("click", chooseBomFile);
+  bomClosePreviewButton.addEventListener("click", closeBomPreview);
+  bomPreviewCloseButton.addEventListener("click", closeBomPreview);
+  bomFileInput.addEventListener("change", handleFallbackBomFile);
   document.addEventListener("input", handleDocumentInput);
   document.addEventListener("paste", handleDocumentPaste);
   document.addEventListener("keydown", handleDocumentKeyDown);
+  document.addEventListener("focusin", handleMaterialFocus);
+  document.addEventListener("click", handleMaterialDocumentClick);
   window.addEventListener("load", schedulePreviewScaleUpdate);
   window.addEventListener("afterprint", restorePendingBatchPrint);
 
@@ -190,10 +237,15 @@
 
   schedulePreviewScaleUpdate();
   buildImageEditor();
+  buildMaterialSearch();
+  updateDependencyStatus();
   addPage();
   schedulePreviewScaleUpdate();
   initializeProjectState();
   initializeLibrary();
+  if (new URLSearchParams(window.location.search).has("selftest")) {
+    runSelfTest();
+  }
 
   function textCell(col, row, colSpan, rowSpan, text, className, options = {}) {
     return {
@@ -205,6 +257,8 @@
       text,
       className,
       autoPage: Boolean(options.autoPage),
+      materialIndex: Number.isInteger(options.materialIndex) ? options.materialIndex : null,
+      materialField: options.materialField || "",
       cellKey: options.cellKey || `c${col}r${row}`
     };
   }
@@ -217,6 +271,7 @@
       colSpan,
       rowSpan,
       material: Boolean(options.material),
+      materialIndex: Number.isInteger(options.materialIndex) ? options.materialIndex : null,
       logo: Boolean(options.logo),
       fit: options.fit || "cover",
       accept: options.accept || "image/*",
@@ -230,6 +285,11 @@
     window.requestAnimationFrame(updatePreviewScale);
     window.setTimeout(updatePreviewScale, 100);
     window.setTimeout(updatePreviewScale, 500);
+  }
+
+  function updateDependencyStatus() {
+    document.body.dataset.xlsxReady = String(Boolean(window.XLSX));
+    document.body.dataset.jszipReady = String(Boolean(window.JSZip));
   }
 
   function updatePreviewScale() {
@@ -292,6 +352,10 @@
     const cell = document.createElement("div");
     cell.className = `sop-cell text-cell ${definition.className || ""}`.trim();
     cell.dataset.cellKey = definition.cellKey;
+    if (definition.materialField) {
+      cell.dataset.materialField = definition.materialField;
+      cell.dataset.materialIndex = String(definition.materialIndex);
+    }
     cell.textContent = definition.text;
     if (definition.autoPage) {
       cell.dataset.role = "page-number";
@@ -311,6 +375,10 @@
     slot.dataset.fit = definition.fit;
     slot.dataset.mediaKind = "empty";
     slot.dataset.cellKey = definition.cellKey;
+    if (definition.material) {
+      slot.dataset.material = "true";
+      slot.dataset.materialIndex = String(definition.materialIndex);
+    }
     if (definition.logo) {
       slot.dataset.logo = "true";
     }
@@ -555,6 +623,209 @@
     button.dataset.editorAction = action;
     button.textContent = text;
     return button;
+  }
+
+  function buildMaterialSearch() {
+    const popover = document.createElement("section");
+    popover.className = "material-search-popover";
+    popover.hidden = true;
+    popover.setAttribute("aria-label", "物料编号搜索");
+
+    const input = document.createElement("input");
+    input.className = "material-search-input";
+    input.type = "search";
+    input.placeholder = "搜索或输入物料编号";
+    input.autocomplete = "off";
+
+    const status = document.createElement("div");
+    status.className = "material-search-status";
+    status.textContent = "请先导入 BOM 表";
+
+    const list = document.createElement("div");
+    list.className = "material-search-list";
+
+    popover.append(input, status, list);
+    document.body.appendChild(popover);
+
+    input.addEventListener("input", () => {
+      if (activeMaterialNumberCell) {
+        setMaterialFieldValue(activeMaterialNumberCell, "number", input.value);
+        markDirty();
+        applyExactBomMatch(activeMaterialNumberCell);
+      }
+      renderMaterialSearchResults(input.value);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const first = getFilteredBomItems(input.value)[0];
+        if (first && activeMaterialNumberCell) {
+          applyBomItemToMaterial(activeMaterialNumberCell, first);
+          hideMaterialSearch();
+        }
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        hideMaterialSearch();
+      }
+    });
+
+    materialSearch.popover = popover;
+    materialSearch.input = input;
+    materialSearch.status = status;
+    materialSearch.list = list;
+  }
+
+  function handleMaterialFocus(event) {
+    const cell = getMaterialNumberCell(event.target);
+    if (cell) {
+      showMaterialSearch(cell);
+    }
+  }
+
+  function handleMaterialDocumentClick(event) {
+    const cell = getMaterialNumberCell(event.target);
+    if (cell) {
+      showMaterialSearch(cell);
+      return;
+    }
+    if (materialSearch.popover && materialSearch.popover.contains(event.target)) return;
+    hideMaterialSearch();
+  }
+
+  function getMaterialNumberCell(target) {
+    const cell = target && target.closest ? target.closest(".text-cell[data-material-field='number']") : null;
+    return cell && cell.isContentEditable ? cell : null;
+  }
+
+  function showMaterialSearch(cell) {
+    activeMaterialNumberCell = cell;
+    if (!materialSearch.popover) return;
+
+    materialSearch.input.value = getMaterialFieldValue(cell, "number");
+    renderMaterialSearchResults(materialSearch.input.value);
+    materialSearch.popover.hidden = false;
+    positionMaterialSearch(cell);
+  }
+
+  function hideMaterialSearch() {
+    activeMaterialNumberCell = null;
+    if (materialSearch.popover) {
+      materialSearch.popover.hidden = true;
+    }
+  }
+
+  function positionMaterialSearch(cell) {
+    if (!materialSearch.popover || !cell) return;
+    const rect = cell.getBoundingClientRect();
+    const popoverWidth = Math.min(360, Math.max(260, window.innerWidth - 24));
+    const left = rect.right + popoverWidth + 12 > window.innerWidth ?
+      Math.max(12, window.innerWidth - popoverWidth - 12) :
+      rect.right + 8;
+    const top = Math.min(Math.max(12, rect.top), Math.max(12, window.innerHeight - 430));
+    materialSearch.popover.style.left = `${roundCoordinate(left)}px`;
+    materialSearch.popover.style.top = `${roundCoordinate(top)}px`;
+  }
+
+  function renderMaterialSearchResults(query) {
+    if (!materialSearch.list || !materialSearch.status) return;
+    materialSearch.list.replaceChildren();
+
+    if (!libraryState.activeBom || !Array.isArray(libraryState.activeBom.items)) {
+      materialSearch.status.textContent = "请先在右侧 SOP库 中选择或导入 BOM 表";
+      return;
+    }
+
+    const items = getFilteredBomItems(query);
+    materialSearch.status.textContent = `${libraryState.activeBom.name || "BOM"} · ${items.length} 个匹配`;
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "library-empty";
+      empty.textContent = "没有匹配的物料编号";
+      materialSearch.list.appendChild(empty);
+      return;
+    }
+
+    items.slice(0, 80).forEach((item) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "material-search-option";
+      const code = document.createElement("strong");
+      code.textContent = item.code || "";
+      const name = document.createElement("span");
+      name.textContent = [item.name, item.spec].filter(Boolean).join(" · ") || "未命名物料";
+      button.append(code, name);
+      button.addEventListener("click", () => {
+        if (activeMaterialNumberCell) {
+          applyBomItemToMaterial(activeMaterialNumberCell, item);
+        }
+        hideMaterialSearch();
+      });
+      materialSearch.list.appendChild(button);
+    });
+  }
+
+  function getFilteredBomItems(query) {
+    const items = libraryState.activeBom && Array.isArray(libraryState.activeBom.items) ?
+      libraryState.activeBom.items :
+      [];
+    const keyword = normalizeSearchText(query);
+    if (!keyword) return items.slice(0, 80);
+    return items.filter((item) => {
+      return normalizeSearchText(`${item.code} ${item.name} ${item.spec}`).includes(keyword);
+    });
+  }
+
+  function applyExactBomMatch(cell) {
+    if (!libraryState.activeBom || !Array.isArray(libraryState.activeBom.items)) return;
+    const code = normalizeSearchText(getMaterialFieldValue(cell, "number"));
+    if (!code) return;
+    const match = libraryState.activeBom.items.find((item) => normalizeSearchText(item.code) === code);
+    if (match) {
+      applyBomItemToMaterial(cell, match, { keepSearchOpen: true });
+    }
+  }
+
+  function applyBomItemToMaterial(numberCell, item, options = {}) {
+    const index = numberCell.dataset.materialIndex;
+    const page = numberCell.closest(".sop-page");
+    if (!page || index === undefined) return;
+
+    const nameCell = page.querySelector(`.text-cell[data-material-index="${index}"][data-material-field="name"]`);
+    const specCell = page.querySelector(`.text-cell[data-material-index="${index}"][data-material-field="spec"]`);
+    const imageSlot = page.querySelector(`.image-cell[data-material-index="${index}"]`);
+
+    setMaterialFieldValue(numberCell, "number", item.code || "");
+    if (nameCell) setMaterialFieldValue(nameCell, "name", item.name || "");
+    if (specCell && item.spec) setMaterialFieldValue(specCell, "spec", item.spec);
+    if (imageSlot && item.imageSrc) {
+      loadImageSource(imageSlot, item.imageSrc, { keepOverlays: false });
+    }
+
+    highlightBomPreviewRow(item);
+    markDirty();
+    if (!options.keepSearchOpen) {
+      hideMaterialSearch();
+    } else {
+      renderMaterialSearchResults(getMaterialFieldValue(numberCell, "number"));
+    }
+  }
+
+  function getMaterialFieldValue(cell, field) {
+    const text = cell ? cell.textContent || "" : "";
+    const prefix = getMaterialFieldPrefix(field);
+    return text.startsWith(prefix) ? text.slice(prefix.length).trim() : text.trim();
+  }
+
+  function setMaterialFieldValue(cell, field, value) {
+    if (!cell) return;
+    cell.textContent = `${getMaterialFieldPrefix(field)}${String(value || "").trim()}`;
+  }
+
+  function getMaterialFieldPrefix(field) {
+    if (field === "name") return "物料名称：";
+    if (field === "number") return "物料编号：";
+    if (field === "spec") return "规格数量：";
+    return "";
   }
 
   function handleEditorCommand(action) {
@@ -1314,6 +1585,20 @@
     reader.readAsDataURL(file);
   }
 
+  function loadImageSource(slot, src, options = {}) {
+    if (!slot || !src) return;
+    clearObjectUrl(slot);
+    if (!options.keepOverlays) {
+      clearSlotOverlays(slot);
+    }
+    slot._sourceInfo = null;
+    const img = slot.querySelector("img");
+    if (!img) return;
+    slot.dataset.mediaKind = "image";
+    img.src = String(src);
+    markDirty();
+  }
+
   function loadLogoSourceFile(slot, file, extension) {
     clearObjectUrl(slot);
     resetSlotMedia(slot);
@@ -1540,6 +1825,15 @@
     const editorText = event.target.closest && event.target.closest(".editor-text-content");
     if (editableCell || editorText) {
       markDirty();
+    }
+    if (editableCell && editableCell.dataset.materialField === "number") {
+      activeMaterialNumberCell = editableCell;
+      if (materialSearch.popover && !materialSearch.popover.hidden) {
+        materialSearch.input.value = getMaterialFieldValue(editableCell, "number");
+        positionMaterialSearch(editableCell);
+        renderMaterialSearchResults(materialSearch.input.value);
+      }
+      applyExactBomMatch(editableCell);
     }
   }
 
@@ -2059,6 +2353,7 @@
 
     try {
       libraryState.db = await openLibraryDb();
+      libraryState.bomHistory = await loadBomHistory();
       const storedHandle = await loadStoredLibraryRoot();
       if (!storedHandle) {
         libraryStatusEl.textContent = "请选择一个电脑文件夹作为 SOP库。";
@@ -2104,6 +2399,10 @@
           const documents = db.createObjectStore("documents", { keyPath: "id" });
           documents.createIndex("folderId", "folderId", { unique: false });
           documents.createIndex("updatedAt", "updatedAt", { unique: false });
+        }
+        if (!db.objectStoreNames.contains("bomHistory")) {
+          const bomHistory = db.createObjectStore("bomHistory", { keyPath: "id" });
+          bomHistory.createIndex("loadedAt", "loadedAt", { unique: false });
         }
       };
 
@@ -2158,6 +2457,7 @@
       const scan = await scanLibraryDirectory();
       libraryState.folders = scan.folders;
       libraryState.documents = scan.documents;
+      libraryState.boms = scan.boms;
       if (
         libraryState.activeFolderId !== ALL_FOLDER_ID &&
         !libraryState.folders.some((folder) => folder.id === libraryState.activeFolderId)
@@ -2184,8 +2484,9 @@
       }
     ];
     const documents = [];
+    const boms = [];
 
-    await scanLibraryFolder(libraryState.rootHandle, "", DEFAULT_FOLDER_ID, folders, documents);
+    await scanLibraryFolder(libraryState.rootHandle, "", DEFAULT_FOLDER_ID, folders, documents, boms);
 
     folders.sort((a, b) => {
       if (a.id === DEFAULT_FOLDER_ID) return -1;
@@ -2195,10 +2496,13 @@
     documents.sort((a, b) => {
       return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
     });
-    return { folders, documents };
+    boms.sort((a, b) => {
+      return new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime();
+    });
+    return { folders, documents, boms };
   }
 
-  async function scanLibraryFolder(folderHandle, folderPath, folderId, folders, documents) {
+  async function scanLibraryFolder(folderHandle, folderPath, folderId, folders, documents, boms) {
     const entries = [];
     for await (const [name, handle] of folderHandle.entries()) {
       entries.push([name, handle]);
@@ -2216,14 +2520,31 @@
           system: false
         };
         folders.push(childFolder);
-        await scanLibraryFolder(handle, childPath, childFolder.id, folders, documents);
+        await scanLibraryFolder(handle, childPath, childFolder.id, folders, documents, boms);
       } else if (handle.kind === "file" && isProjectFileName(name)) {
         const documentItem = await readLibraryDocument(handle, folderHandle, folderId, folderPath, name);
         if (documentItem) {
           documents.push(documentItem);
         }
+      } else if (handle.kind === "file" && isBomFileName(name)) {
+        boms.push(await readLibraryBom(handle, folderHandle, folderId, folderPath, name));
       }
     }
+  }
+
+  async function readLibraryBom(fileHandle, folderHandle, folderId, folderPath, fileName) {
+    const file = await fileHandle.getFile();
+    return {
+      id: createLibraryFileId(folderId, fileName),
+      name: fileName,
+      folderId,
+      folderPath,
+      fileName,
+      fileHandle,
+      folderHandle,
+      updatedAt: file.lastModified ? new Date(file.lastModified).toISOString() : "",
+      source: "folder"
+    };
   }
 
   async function readLibraryDocument(fileHandle, folderHandle, folderId, folderPath, fileName) {
@@ -2255,6 +2576,7 @@
   function renderLibrary() {
     updateLibraryControls();
     renderLibraryFolders();
+    renderBomHistory();
     renderLibraryDocuments();
     syncLibraryActiveState();
   }
@@ -2265,6 +2587,8 @@
     libraryRefreshFolderButton.disabled = !supportsFolderAccess || !libraryState.rootHandle;
     libraryNewFolderButton.disabled = !libraryState.ready;
     librarySaveCurrentButton.disabled = !libraryState.ready;
+    bomPickFileButton.disabled = !supportsFolderAccess && !window.FileReader;
+    bomClosePreviewButton.disabled = !libraryState.activeBom && bomPreviewPanel.hidden;
     batchPrintButton.disabled = !libraryState.ready || libraryState.busy || !getVisibleLibraryDocuments().length;
   }
 
@@ -2311,6 +2635,61 @@
       renderLibrary();
     });
     return button;
+  }
+
+  function renderBomHistory() {
+    bomHistoryListEl.replaceChildren();
+    const items = getVisibleBomItems();
+
+    if (!items.length) {
+      const empty = document.createElement("div");
+      empty.className = "library-empty";
+      empty.textContent = "当前文件夹暂无 BOM 表，或点击“选择BOM表”导入。";
+      bomHistoryListEl.appendChild(empty);
+      return;
+    }
+
+    items.forEach((item) => {
+      bomHistoryListEl.appendChild(buildBomHistoryItem(item));
+    });
+  }
+
+  function buildBomHistoryItem(item) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "bom-history-item";
+    button.classList.toggle("active", Boolean(libraryState.activeBom && libraryState.activeBom.id === item.id));
+    button.dataset.bomId = item.id;
+
+    const title = document.createElement("strong");
+    title.textContent = removeBomExtension(item.name || item.fileName || "未命名BOM");
+    const meta = document.createElement("span");
+    const folder = item.folderId ? getLibraryFolder(item.folderId) : null;
+    const source = item.source === "folder" && folder ? folder.name : "最近读取";
+    meta.textContent = `${source} · ${formatDateTime(item.loadedAt || item.updatedAt)}`;
+    button.append(title, meta);
+    button.addEventListener("click", () => loadBomItem(item));
+    return button;
+  }
+
+  function getVisibleBomItems() {
+    const folderBoms = libraryState.activeFolderId === ALL_FOLDER_ID ?
+      libraryState.boms :
+      libraryState.boms.filter((item) => (item.folderId || DEFAULT_FOLDER_ID) === libraryState.activeFolderId);
+    const seen = new Set();
+    const items = [];
+
+    folderBoms.forEach((item) => {
+      seen.add(item.id);
+      items.push(item);
+    });
+    libraryState.bomHistory.forEach((item) => {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        items.push(item);
+      }
+    });
+    return items.slice(0, BOM_HISTORY_LIMIT);
   }
 
   function renderLibraryDocuments() {
@@ -2396,6 +2775,611 @@
       libraryStatusEl.textContent = `已在电脑文件夹中新建：${name}`;
     } catch (error) {
       libraryStatusEl.textContent = `新建文件夹失败：${error.message || error}`;
+    }
+  }
+
+  async function chooseBomFile() {
+    try {
+      if (window.showOpenFilePicker) {
+        const [handle] = await window.showOpenFilePicker({
+          multiple: false,
+          types: [
+            {
+              description: "BOM表",
+              accept: {
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+                "application/vnd.ms-excel": [".xls"],
+                "text/csv": [".csv", ".tsv", ".txt"],
+                "application/json": [".json"]
+              }
+            }
+          ]
+        });
+        if (!handle) return;
+        const file = await handle.getFile();
+        await loadBomFromFile(file, {
+          id: createLibraryFileId("manual", handle.name || file.name),
+          name: handle.name || file.name,
+          fileName: handle.name || file.name,
+          fileHandle: handle,
+          source: "manual"
+        });
+        return;
+      }
+      bomFileInput.click();
+    } catch (error) {
+      if (error && error.name === "AbortError") return;
+      libraryStatusEl.textContent = `读取BOM失败：${error.message || error}`;
+    }
+  }
+
+  async function handleFallbackBomFile() {
+    const file = bomFileInput.files && bomFileInput.files[0];
+    bomFileInput.value = "";
+    if (!file) return;
+
+    try {
+      await loadBomFromFile(file, {
+        id: createLibraryFileId("upload", `${file.name}-${file.lastModified || Date.now()}`),
+        name: file.name,
+        fileName: file.name,
+        source: "upload"
+      });
+    } catch (error) {
+      libraryStatusEl.textContent = `读取BOM失败：${error.message || error}`;
+    }
+  }
+
+  async function loadBomItem(item) {
+    try {
+      if (item.fileHandle) {
+        const file = await item.fileHandle.getFile();
+        await loadBomFromFile(file, item);
+        return;
+      }
+      if (Array.isArray(item.items)) {
+        activateBom({
+          ...item,
+          headers: item.headers || [],
+          rows: item.rows || [],
+          items: item.items || []
+        });
+        return;
+      }
+      libraryStatusEl.textContent = "这个BOM历史记录缺少文件权限，请重新选择BOM表。";
+    } catch (error) {
+      libraryStatusEl.textContent = `读取BOM失败：${error.message || error}`;
+    }
+  }
+
+  async function loadBomFromFile(file, source = {}) {
+    if (!isBomFileName(file.name)) {
+      throw new Error("请选择 .xlsx、.xls、.csv、.tsv、.txt 或 .json 格式的 BOM 表。");
+    }
+
+    const parsed = await parseBomFile(file);
+    const bom = {
+      ...parsed,
+      id: source.id || createLibraryFileId(source.folderId || "manual", source.fileName || file.name),
+      name: source.name || file.name,
+      fileName: source.fileName || file.name,
+      fileHandle: source.fileHandle || null,
+      folderId: source.folderId || "",
+      folderPath: source.folderPath || "",
+      updatedAt: source.updatedAt || (file.lastModified ? new Date(file.lastModified).toISOString() : ""),
+      loadedAt: new Date().toISOString(),
+      source: source.source || "manual"
+    };
+
+    await rememberBom(bom);
+    activateBom(bom);
+  }
+
+  function activateBom(bom) {
+    libraryState.activeBom = bom;
+    openBomPreview(bom);
+    renderBomHistory();
+    if (activeMaterialNumberCell) {
+      renderMaterialSearchResults(getMaterialFieldValue(activeMaterialNumberCell, "number"));
+    }
+    libraryStatusEl.textContent = `已读取BOM：${removeBomExtension(bom.name)}，${bom.items.length} 个物料`;
+  }
+
+  function openBomPreview(bom) {
+    bomPreviewPanel.hidden = false;
+    appShellEl.classList.add("bom-preview-open");
+    setLibraryCollapsed(true);
+    renderBomPreview(bom);
+    updateLibraryControls();
+    schedulePreviewScaleUpdate();
+  }
+
+  function closeBomPreview() {
+    bomPreviewPanel.hidden = true;
+    appShellEl.classList.remove("bom-preview-open");
+    updateLibraryControls();
+    schedulePreviewScaleUpdate();
+  }
+
+  function setLibraryCollapsed(collapsed) {
+    libraryState.collapsed = Boolean(collapsed);
+    appShellEl.classList.toggle("library-collapsed", libraryState.collapsed);
+    libraryPanelEl.classList.toggle("is-collapsed", libraryState.collapsed);
+    libraryToggleButton.textContent = libraryState.collapsed ? "‹" : "›";
+    libraryToggleButton.setAttribute("aria-expanded", String(!libraryState.collapsed));
+    libraryToggleButton.setAttribute("aria-label", libraryState.collapsed ? "展开SOP库" : "折叠SOP库");
+    schedulePreviewScaleUpdate();
+  }
+
+  function renderBomPreview(bom) {
+    bomPreviewTitle.textContent = removeBomExtension(bom.name || "BOM表");
+    bomPreviewMeta.textContent = `${bom.items.length} 个物料 · ${bom.headers.length || 0} 列`;
+    bomPreviewStatus.textContent = bom.imageCount ?
+      `已识别 ${bom.items.length} 个物料，包含 ${bom.imageCount} 张可填充图片。` :
+      `已识别 ${bom.items.length} 个物料；如需自动填图，BOM中需包含图片链接、base64图片或xlsx内嵌图片。`;
+    bomPreviewTable.replaceChildren();
+
+    const headers = bom.headers && bom.headers.length ? bom.headers : ["物料编号", "物料名称", "规格数量", "图片"];
+    const thead = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    headers.forEach((header) => {
+      const th = document.createElement("th");
+      th.textContent = header || "";
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+
+    const tbody = document.createElement("tbody");
+    const rows = (bom.rows || []).slice(0, 500);
+    rows.forEach((row, index) => {
+      const tr = document.createElement("tr");
+      tr.dataset.bomRow = String((bom.rowIndexes || [])[index] ?? index);
+      headers.forEach((_, colIndex) => {
+        const td = document.createElement("td");
+        td.textContent = row[colIndex] || "";
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+
+    bomPreviewTable.append(thead, tbody);
+  }
+
+  function highlightBomPreviewRow(item) {
+    if (!item || bomPreviewPanel.hidden) return;
+    bomPreviewTable.querySelectorAll("tr.is-match").forEach((row) => row.classList.remove("is-match"));
+    const row = bomPreviewTable.querySelector(`tbody tr[data-bom-row="${item.rowIndex}"]`);
+    if (row) {
+      row.classList.add("is-match");
+      row.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }
+
+  async function rememberBom(bom) {
+    const record = {
+      id: bom.id,
+      name: bom.name,
+      fileName: bom.fileName,
+      folderId: bom.folderId,
+      folderPath: bom.folderPath,
+      updatedAt: bom.updatedAt,
+      loadedAt: bom.loadedAt,
+      source: bom.source,
+      fileHandle: bom.fileHandle || null,
+      headers: bom.fileHandle ? [] : bom.headers,
+      rows: bom.fileHandle ? [] : bom.rows,
+      rowIndexes: bom.fileHandle ? [] : bom.rowIndexes,
+      items: bom.fileHandle ? [] : bom.items,
+      imageCount: bom.imageCount || 0
+    };
+    libraryState.bomHistory = [
+      record,
+      ...libraryState.bomHistory.filter((item) => item.id !== record.id)
+    ].slice(0, BOM_HISTORY_LIMIT);
+
+    if (libraryState.db) {
+      await idbPut("bomHistory", record);
+    }
+  }
+
+  async function loadBomHistory() {
+    if (!libraryState.db) return [];
+    try {
+      const records = await idbGetAll("bomHistory");
+      return records
+        .sort((a, b) => new Date(b.loadedAt || 0).getTime() - new Date(a.loadedAt || 0).getTime())
+        .slice(0, BOM_HISTORY_LIMIT);
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function parseBomFile(file) {
+    const extension = getFileExtension(file.name);
+    if ([".csv", ".tsv", ".txt"].includes(extension)) {
+      const text = await file.text();
+      const rows = parseDelimitedText(text, extension === ".tsv" ? "\t" : detectDelimiter(text));
+      return buildBomData(rows, file.name);
+    }
+    if (extension === ".json") {
+      const data = JSON.parse(await file.text());
+      return buildBomData(jsonToRows(data), file.name);
+    }
+    if ([".xlsx", ".xls"].includes(extension)) {
+      if (!window.XLSX) {
+        throw new Error("Excel解析库未加载，请确认网络可访问后刷新页面。");
+      }
+      const buffer = await file.arrayBuffer();
+      const workbook = window.XLSX.read(buffer, { type: "array", cellDates: true });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        throw new Error("BOM表没有可读取的工作表。");
+      }
+      const sheet = workbook.Sheets[sheetName];
+      const rows = window.XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+      const images = extension === ".xlsx" ? await extractXlsxImages(buffer, sheetName).catch(() => []) : [];
+      return buildBomData(rows, file.name, images);
+    }
+    throw new Error("不支持的BOM格式。");
+  }
+
+  function buildBomData(rows, fileName, images = []) {
+    const cleanRows = rows
+      .map((row) => Array.from(row || []).map(cleanCellText))
+      .filter((row) => row.some(Boolean));
+    if (!cleanRows.length) {
+      throw new Error("BOM表没有可读取的数据。");
+    }
+
+    const headerInfo = detectBomHeader(cleanRows);
+    const headers = cleanRows[headerInfo.headerIndex] || [];
+    const dataRows = cleanRows.slice(headerInfo.headerIndex + 1);
+    const imageByRow = new Map(images.map((image) => [image.row, image.dataUrl]));
+    const tableRows = [];
+    const rowIndexes = [];
+    const items = [];
+    let imageCount = 0;
+
+    dataRows.forEach((row, index) => {
+      const sourceRowIndex = headerInfo.headerIndex + 1 + index;
+      if (!row.some(Boolean)) return;
+      const code = cleanCellText(row[headerInfo.codeCol]);
+      if (!code || normalizeSearchText(code) === normalizeSearchText(headers[headerInfo.codeCol])) return;
+
+      const imageSrc = normalizeBomImageSource(row[headerInfo.imageCol]) || imageByRow.get(sourceRowIndex) || "";
+      if (imageSrc) imageCount += 1;
+      const item = {
+        id: `bom-${sourceRowIndex}-${code}`,
+        code,
+        name: cleanCellText(row[headerInfo.nameCol]),
+        spec: cleanCellText(row[headerInfo.specCol]),
+        imageSrc,
+        rowIndex: sourceRowIndex,
+        cells: row
+      };
+      tableRows.push(row);
+      rowIndexes.push(sourceRowIndex);
+      items.push(item);
+    });
+
+    if (!items.length) {
+      throw new Error("没有识别到物料编号列，请检查BOM表头是否包含“物料编号/料号/编码”等字段。");
+    }
+
+    return {
+      sourceName: fileName,
+      headers,
+      rows: tableRows,
+      rowIndexes,
+      items,
+      imageCount,
+      columnMap: headerInfo
+    };
+  }
+
+  function detectBomHeader(rows) {
+    let best = { headerIndex: 0, score: -1 };
+    rows.slice(0, 20).forEach((row, index) => {
+      const score = row.reduce((sum, cell) => sum + scoreBomHeaderCell(cell), 0);
+      if (score > best.score) {
+        best = { headerIndex: index, score };
+      }
+    });
+    if (best.score < 3) {
+      best.headerIndex = 0;
+    }
+
+    const headers = rows[best.headerIndex] || [];
+    const codeCol = findBomColumn(headers, [
+      /物料.*(编号|编码|代码)/,
+      /料号/,
+      /物料号/,
+      /编码/,
+      /编号/,
+      /part.*(no|number)/i,
+      /item.*(no|number)/i,
+      /material.*(no|number|code)/i
+    ], 0);
+    const nameCol = findBomColumn(headers, [
+      /物料.*名称/,
+      /名称/,
+      /品名/,
+      /描述/,
+      /物料描述/,
+      /name/i,
+      /description/i
+    ], codeCol === 0 ? 1 : 0);
+    const specCol = findBomColumn(headers, [
+      /规格/,
+      /型号/,
+      /数量/,
+      /规格数量/,
+      /spec/i,
+      /qty/i,
+      /quantity/i
+    ], -1);
+    const imageCol = findBomColumn(headers, [
+      /图片/,
+      /图/,
+      /照片/,
+      /image/i,
+      /photo/i,
+      /picture/i,
+      /url/i
+    ], -1);
+
+    return { headerIndex: best.headerIndex, codeCol, nameCol, specCol, imageCol };
+  }
+
+  function scoreBomHeaderCell(value) {
+    const text = normalizeSearchText(value);
+    if (!text) return 0;
+    if (/物料.*(编号|编码|代码)|料号|物料号|part.*(no|number)|item.*(no|number)|material.*(no|number|code)/i.test(text)) return 3;
+    if (/物料.*名称|名称|品名|描述|name|description/i.test(text)) return 2;
+    if (/规格|型号|数量|spec|qty|quantity/i.test(text)) return 1;
+    if (/图片|照片|image|photo|picture|url/i.test(text)) return 1;
+    return 0;
+  }
+
+  function findBomColumn(headers, patterns, fallback) {
+    const index = headers.findIndex((header) => {
+      const raw = cleanCellText(header);
+      const normalized = normalizeSearchText(raw);
+      return patterns.some((pattern) => pattern.test(raw) || pattern.test(normalized));
+    });
+    return index >= 0 ? index : fallback;
+  }
+
+  function parseDelimitedText(text, delimiter) {
+    const rows = [];
+    let row = [];
+    let cell = "";
+    let inQuotes = false;
+    for (let index = 0; index < text.length; index += 1) {
+      const char = text[index];
+      const next = text[index + 1];
+      if (char === "\"") {
+        if (inQuotes && next === "\"") {
+          cell += "\"";
+          index += 1;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (char === delimiter && !inQuotes) {
+        row.push(cell);
+        cell = "";
+      } else if ((char === "\n" || char === "\r") && !inQuotes) {
+        if (char === "\r" && next === "\n") index += 1;
+        row.push(cell);
+        rows.push(row);
+        row = [];
+        cell = "";
+      } else {
+        cell += char;
+      }
+    }
+    row.push(cell);
+    rows.push(row);
+    return rows;
+  }
+
+  function detectDelimiter(text) {
+    const firstLines = text.split(/\r?\n/).slice(0, 5).join("\n");
+    const commaCount = (firstLines.match(/,/g) || []).length;
+    const tabCount = (firstLines.match(/\t/g) || []).length;
+    const semicolonCount = (firstLines.match(/;/g) || []).length;
+    if (tabCount > commaCount && tabCount >= semicolonCount) return "\t";
+    if (semicolonCount > commaCount) return ";";
+    return ",";
+  }
+
+  function jsonToRows(data) {
+    const source = Array.isArray(data) ? data : data.rows || data.items || data.data || [];
+    if (!Array.isArray(source)) {
+      throw new Error("JSON BOM 必须是数组，或包含 rows/items/data 数组。");
+    }
+    if (!source.length) return [];
+    if (Array.isArray(source[0])) return source;
+    const headers = Array.from(new Set(source.flatMap((item) => Object.keys(item || {}))));
+    return [
+      headers,
+      ...source.map((item) => headers.map((header) => item && item[header] !== undefined ? item[header] : ""))
+    ];
+  }
+
+  async function extractXlsxImages(buffer, sheetName) {
+    if (!window.JSZip) return [];
+    const zip = await window.JSZip.loadAsync(buffer);
+    const workbookXml = await readZipText(zip, "xl/workbook.xml");
+    const workbookRelsXml = await readZipText(zip, "xl/_rels/workbook.xml.rels");
+    if (!workbookXml || !workbookRelsXml) return [];
+
+    const workbookDoc = parseXml(workbookXml);
+    const sheetNodes = getXmlElements(workbookDoc, "sheet");
+    const sheetNode = sheetNodes.find((node) => node.getAttribute("name") === sheetName) || sheetNodes[0];
+    if (!sheetNode) return [];
+    const sheetRelId = sheetNode.getAttribute("r:id") || sheetNode.getAttribute("id");
+    const workbookRels = parseXmlRelationships(workbookRelsXml);
+    const sheetPath = resolveZipPath("xl", workbookRels.get(sheetRelId));
+    if (!sheetPath) return [];
+
+    const sheetRelsPath = getRelsPath(sheetPath);
+    const sheetRelsXml = await readZipText(zip, sheetRelsPath);
+    if (!sheetRelsXml) return [];
+    const sheetRels = parseXmlRelationships(sheetRelsXml);
+    const drawingTarget = Array.from(sheetRels.values()).find((target) => /drawings\/drawing\d+\.xml$/i.test(target));
+    if (!drawingTarget) return [];
+    const drawingPath = resolveZipPath(getZipDir(sheetPath), drawingTarget);
+    const drawingXml = await readZipText(zip, drawingPath);
+    const drawingRelsXml = await readZipText(zip, getRelsPath(drawingPath));
+    if (!drawingXml || !drawingRelsXml) return [];
+
+    const drawingDoc = parseXml(drawingXml);
+    const drawingRels = parseXmlRelationships(drawingRelsXml);
+    const anchors = [
+      ...getXmlElements(drawingDoc, "twoCellAnchor"),
+      ...getXmlElements(drawingDoc, "oneCellAnchor")
+    ];
+    const images = [];
+
+    for (const anchor of anchors) {
+      const from = getXmlElements(anchor, "from")[0];
+      const row = Number(getXmlText(from, "row"));
+      const col = Number(getXmlText(from, "col"));
+      const blip = getXmlElements(anchor, "blip")[0];
+      const relId = blip && (blip.getAttribute("r:embed") || blip.getAttribute("embed"));
+      const mediaTarget = drawingRels.get(relId);
+      const mediaPath = resolveZipPath(getZipDir(drawingPath), mediaTarget);
+      const mediaFile = mediaPath ? zip.file(mediaPath) : null;
+      if (!mediaFile || !Number.isFinite(row)) continue;
+      const base64 = await mediaFile.async("base64");
+      images.push({
+        row,
+        col: Number.isFinite(col) ? col : -1,
+        dataUrl: `data:${getImageMimeType(mediaPath)};base64,${base64}`
+      });
+    }
+
+    return images;
+  }
+
+  async function readZipText(zip, path) {
+    const file = path ? zip.file(path.replace(/^\/+/, "")) : null;
+    return file ? file.async("text") : "";
+  }
+
+  function parseXml(text) {
+    return new DOMParser().parseFromString(text, "application/xml");
+  }
+
+  function parseXmlRelationships(text) {
+    const doc = parseXml(text);
+    const map = new Map();
+    getXmlElements(doc, "Relationship").forEach((node) => {
+      map.set(node.getAttribute("Id"), node.getAttribute("Target"));
+    });
+    return map;
+  }
+
+  function getXmlElements(root, localName) {
+    if (!root) return [];
+    return Array.from(root.getElementsByTagName("*")).filter((node) => node.localName === localName);
+  }
+
+  function getXmlText(root, localName) {
+    const node = getXmlElements(root, localName)[0];
+    return node ? node.textContent || "" : "";
+  }
+
+  function resolveZipPath(baseDir, target) {
+    if (!target) return "";
+    const parts = `${baseDir || ""}/${target}`.split("/");
+    const resolved = [];
+    parts.forEach((part) => {
+      if (!part || part === ".") return;
+      if (part === "..") {
+        resolved.pop();
+      } else {
+        resolved.push(part);
+      }
+    });
+    return resolved.join("/");
+  }
+
+  function getZipDir(path) {
+    const normalized = String(path || "").replace(/\\/g, "/");
+    const index = normalized.lastIndexOf("/");
+    return index >= 0 ? normalized.slice(0, index) : "";
+  }
+
+  function getRelsPath(path) {
+    const dir = getZipDir(path);
+    const name = String(path || "").slice(dir.length + 1);
+    return `${dir}/_rels/${name}.rels`;
+  }
+
+  function getImageMimeType(path) {
+    const extension = getFileExtension(path);
+    if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+    if (extension === ".gif") return "image/gif";
+    if (extension === ".webp") return "image/webp";
+    if (extension === ".svg") return "image/svg+xml";
+    return "image/png";
+  }
+
+  function normalizeBomImageSource(value) {
+    const text = cleanCellText(value);
+    if (!text) return "";
+    if (/^data:image\//i.test(text)) return text;
+    if (/^https?:\/\//i.test(text)) return text;
+    if (/^\/\//.test(text)) return `https:${text}`;
+    if (/^[A-Za-z0-9+/=\s]{120,}$/.test(text)) {
+      return `data:image/png;base64,${text.replace(/\s+/g, "")}`;
+    }
+    return "";
+  }
+
+  async function runSelfTest() {
+    try {
+      const imageData = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+      const csv = [
+        "物料编号,物料名称,规格数量,图片",
+        `MAT-001,测试物料,2PCS,"${imageData}"`
+      ].join("\n");
+      const file = new File([csv], "selftest-bom.csv", { type: "text/csv" });
+      const parsed = await parseBomFile(file);
+      const bom = {
+        ...parsed,
+        id: "selftest-bom",
+        name: "selftest-bom.csv",
+        fileName: "selftest-bom.csv",
+        loadedAt: new Date().toISOString(),
+        source: "selftest"
+      };
+
+      libraryState.activeBom = bom;
+      openBomPreview(bom);
+      const numberCell = document.querySelector(".text-cell[data-material-field='number'][data-material-index='0']");
+      applyBomItemToMaterial(numberCell, bom.items[0]);
+      const page = numberCell.closest(".sop-page");
+      const nameCell = page.querySelector(".text-cell[data-material-field='name'][data-material-index='0']");
+      const imageSlot = page.querySelector(".image-cell[data-material-index='0']");
+      const img = imageSlot.querySelector("img");
+      await waitImageReady(img);
+      await nextFrame();
+
+      const passed = getMaterialFieldValue(numberCell, "number") === "MAT-001" &&
+        getMaterialFieldValue(nameCell, "name") === "测试物料" &&
+        imageSlot.dataset.hasImage === "true" &&
+        bomPreviewPanel.hidden === false &&
+        appShellEl.classList.contains("bom-preview-open");
+      document.body.dataset.selftest = passed ? "pass" : "fail";
+      if (!passed) {
+        document.body.dataset.selftestError = "BOM selftest assertions failed";
+      }
+    } catch (error) {
+      document.body.dataset.selftest = "fail";
+      document.body.dataset.selftestError = error && error.message ? error.message : String(error);
     }
   }
 
@@ -2650,6 +3634,10 @@
     return /\.sop\.json$/i.test(String(fileName || ""));
   }
 
+  function isBomFileName(fileName) {
+    return bomFileExtensions.includes(getFileExtension(fileName));
+  }
+
   function sanitizeLibraryName(value) {
     return String(value || "").trim().replace(/[\\/:*?"<>|]/g, "-").slice(0, 80);
   }
@@ -2658,8 +3646,16 @@
     return String(fileName || "未命名").replace(/\.sop\.json$/i, "").replace(/\.json$/i, "");
   }
 
+  function removeBomExtension(fileName) {
+    return String(fileName || "未命名BOM").replace(/\.(xlsx|xls|csv|tsv|txt|json)$/i, "");
+  }
+
   function idbGet(storeName, key) {
     return idbRequest(storeName, "readonly", (store) => store.get(key));
+  }
+
+  function idbGetAll(storeName) {
+    return idbRequest(storeName, "readonly", (store) => store.getAll());
   }
 
   function idbPut(storeName, value) {
@@ -2921,6 +3917,18 @@
   function getFileExtension(fileName) {
     const match = String(fileName || "").toLowerCase().match(/\.[^.]+$/);
     return match ? match[0] : "";
+  }
+
+  function cleanCellText(value) {
+    if (value === null || value === undefined) return "";
+    if (value instanceof Date) return value.toISOString().slice(0, 10);
+    return String(value).replace(/\u00a0/g, " ").trim();
+  }
+
+  function normalizeSearchText(value) {
+    return cleanCellText(value)
+      .toLowerCase()
+      .replace(/[：:\s_\-\/\\|,，.。;；()（）\[\]【】]+/g, "");
   }
 
   function isDisplayableImageExtension(extension) {

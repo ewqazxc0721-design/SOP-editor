@@ -40,8 +40,11 @@
 
     <aside class="library-panel" aria-label="SOP历史记录">
       <div class="library-header">
-        <strong>SOP库</strong>
-        <span id="library-count">0</span>
+        <div class="library-title">
+          <strong>SOP库</strong>
+          <span id="library-count">0</span>
+        </div>
+        <button class="library-toggle" id="library-toggle" type="button" aria-label="折叠SOP库" aria-expanded="true">›</button>
       </div>
       <div class="library-section-title">文件</div>
       <div class="library-file-actions">
@@ -78,12 +81,36 @@
       </div>
       <div class="library-section-title">文件夹</div>
       <div class="folder-list" id="library-folder-list"></div>
+      <div class="library-section-title">BOM表</div>
+      <div class="library-actions">
+        <button class="library-action-button primary" id="bom-pick-file" type="button">选择BOM表</button>
+        <button class="library-action-button" id="bom-close-preview" type="button">关闭预览</button>
+      </div>
+      <input class="file-input" id="bom-file-input" type="file" accept=".xlsx,.xls,.csv,.tsv,.txt,.json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,application/json">
+      <div class="library-section-title">BOM历史记录</div>
+      <div class="bom-history-list" id="bom-history-list"></div>
       <div class="library-section-title">SOP历史记录</div>
       <div class="sop-library-list" id="sop-library-list"></div>
       <div class="library-status" id="library-status">电脑文件夹准备中</div>
     </aside>
+
+    <aside class="bom-preview-panel" id="bom-preview-panel" aria-label="BOM表预览" hidden>
+      <div class="bom-preview-header">
+        <div>
+          <strong id="bom-preview-title">BOM表</strong>
+          <span id="bom-preview-meta">未加载</span>
+        </div>
+        <button class="bom-preview-close" id="bom-preview-close" type="button" aria-label="关闭BOM预览">×</button>
+      </div>
+      <div class="bom-preview-status" id="bom-preview-status">选择或点击一个 BOM 表后，这里会显示预览。</div>
+      <div class="bom-preview-table-wrap">
+        <table class="bom-preview-table" id="bom-preview-table"></table>
+      </div>
+    </aside>
   </main>
 
+  <script src="./vendor/xlsx.full.min.js"></script>
+  <script src="./vendor/jszip.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

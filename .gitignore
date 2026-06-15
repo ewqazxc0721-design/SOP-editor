@@ -9,3 +9,6 @@
 !.github/
 !.github/workflows/
 !.github/workflows/pages.yml
+!vendor/
+!vendor/xlsx.full.min.js
+!vendor/jszip.min.js
