@@ -24,6 +24,15 @@
   const libraryRefreshFolderButton = document.getElementById("library-refresh-folder");
   const libraryNewFolderButton = document.getElementById("library-new-folder");
   const librarySaveCurrentButton = document.getElementById("library-save-current");
+  const feishuProxyUrlInput = document.getElementById("feishu-proxy-url");
+  const feishuFolderLinkInput = document.getElementById("feishu-folder-link");
+  const feishuConnectButton = document.getElementById("feishu-connect");
+  const feishuRefreshButton = document.getElementById("feishu-refresh");
+  const feishuNewFolderButton = document.getElementById("feishu-new-folder");
+  const feishuDisconnectButton = document.getElementById("feishu-disconnect");
+  const feishuPanel = document.getElementById("feishu-panel");
+  const feishuPanelToggle = document.getElementById("feishu-panel-toggle");
+  const feishuPanelBody = document.getElementById("feishu-panel-body");
   const libraryFolderListEl = document.getElementById("library-folder-list");
   const sopLibraryListEl = document.getElementById("sop-library-list");
   const bomPickFileButton = document.getElementById("bom-pick-file");
@@ -37,7 +46,7 @@
   const bomPreviewTable = document.getElementById("bom-preview-table");
   const bomPreviewCloseButton = document.getElementById("bom-preview-close");
 
-  const APP_VERSION = "1.2.0";
+  const APP_VERSION = "1.3.0";
   const SOP_SCHEMA_VERSION = 2;
   const SOP_FILE_TYPE = "sop-template-project";
   const LIBRARY_DB_NAME = "sop-template-library";
@@ -45,6 +54,11 @@
   const DEFAULT_FOLDER_ID = "root";
   const ALL_FOLDER_ID = "all";
   const ROOT_DIRECTORY_SETTING_KEY = "rootDirectory";
+  const LIBRARY_STORAGE_MODE_SETTING_KEY = "libraryStorageMode";
+  const FEISHU_SETTING_KEY = "feishuLibrary";
+  const FEISHU_PANEL_COLLAPSED_KEY = "sop-feishu-panel-collapsed";
+  const STORAGE_MODE_LOCAL = "local";
+  const STORAGE_MODE_FEISHU = "feishu";
   const BOM_HISTORY_LIMIT = 12;
   const displayableImageExtensions = [".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif", ".bmp", ".ico"];
   const logoSourceExtensions = [".ai", ".eps", ".pdf"];
@@ -77,6 +91,7 @@
   const libraryState = {
     db: null,
     ready: false,
+    storageMode: STORAGE_MODE_LOCAL,
     rootHandle: null,
     rootName: "",
     folders: [],
@@ -86,7 +101,13 @@
     activeBom: null,
     activeFolderId: ALL_FOLDER_ID,
     collapsed: false,
-    busy: false
+    busy: false,
+    feishu: {
+      proxyUrl: "",
+      folderInput: "",
+      folderToken: "",
+      connected: false
+    }
   };
 
   const materialSearch = {
@@ -207,12 +228,24 @@
     reason: "手动保存到SOP库",
     assignActiveFolder: true
   }));
+  feishuConnectButton.addEventListener("click", connectFeishuLibrary);
+  feishuRefreshButton.addEventListener("click", () => refreshFeishuLibrary({ manual: true }));
+  feishuNewFolderButton.addEventListener("click", createFeishuFolder);
+  feishuDisconnectButton.addEventListener("click", disconnectFeishuLibrary);
+  feishuPanelToggle.addEventListener("click", () => {
+    setFeishuPanelCollapsed(!feishuPanel.classList.contains("is-collapsed"), { persist: true });
+  });
   bomPickFileButton.addEventListener("click", chooseBomFile);
   bomClosePreviewButton.addEventListener("click", closeBomPreview);
   bomPreviewCloseButton.addEventListener("click", closeBomPreview);
   bomFileInput.addEventListener("change", handleFallbackBomFile);
   document.addEventListener("input", handleDocumentInput);
   document.addEventListener("paste", handleDocumentPaste);
+  document.addEventListener("dragenter", handleDocumentFileDragEnter, true);
+  document.addEventListener("dragover", handleDocumentFileDragOver, true);
+  document.addEventListener("dragleave", handleDocumentFileDragLeave, true);
+  document.addEventListener("drop", handleDocumentFileDrop, true);
+  document.addEventListener("dragend", clearAllImageSlotDragStates, true);
   document.addEventListener("keydown", handleDocumentKeyDown);
   document.addEventListener("focusin", handleMaterialFocus);
   document.addEventListener("click", handleMaterialDocumentClick);
@@ -238,6 +271,7 @@
   schedulePreviewScaleUpdate();
   buildImageEditor();
   buildMaterialSearch();
+  initializeFeishuPanelCollapse();
   updateDependencyStatus();
   addPage();
   schedulePreviewScaleUpdate();
@@ -1738,6 +1772,114 @@
     }
   }
 
+  function handleDocumentFileDragEnter(event) {
+    if (!isFileDragEvent(event)) return;
+    event.preventDefault();
+
+    const slot = getImageSlotFromElement(event.target);
+    if (!slot) return;
+
+    event.stopPropagation();
+    slot._dragDepth = (slot._dragDepth || 0) + 1;
+    slot.classList.add("is-drag-over");
+  }
+
+  function handleDocumentFileDragOver(event) {
+    if (!isFileDragEvent(event)) return;
+    event.preventDefault();
+
+    const slot = getImageSlotFromElement(event.target);
+    if (!slot) {
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+      return;
+    }
+
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = canDropImageSlotFile(slot, event.dataTransfer) ? "copy" : "none";
+    slot.classList.add("is-drag-over");
+  }
+
+  function handleDocumentFileDragLeave(event) {
+    if (!isFileDragEvent(event)) return;
+    const slot = getImageSlotFromElement(event.target);
+    if (!slot) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    slot._dragDepth = Math.max(0, (slot._dragDepth || 0) - 1);
+    if (!slot._dragDepth) {
+      slot.classList.remove("is-drag-over");
+    }
+  }
+
+  function handleDocumentFileDrop(event) {
+    if (!isFileDragEvent(event)) return;
+    event.preventDefault();
+
+    const slot = getImageSlotFromElement(event.target);
+    clearAllImageSlotDragStates();
+    if (!slot) return;
+
+    event.stopPropagation();
+    const file = getFirstSupportedDroppedFile(slot, event.dataTransfer);
+    if (!file) return;
+
+    activateImageSlot(slot);
+    loadImageFile(slot, file);
+  }
+
+  function isFileDragEvent(event) {
+    const dataTransfer = event.dataTransfer;
+    if (!dataTransfer) return false;
+    if (dataTransfer.files && dataTransfer.files.length) return true;
+
+    const items = Array.from(dataTransfer.items || []);
+    if (items.some((item) => item.kind === "file")) return true;
+
+    const types = Array.from(dataTransfer.types || []).map((type) => String(type).toLowerCase());
+    return types.includes("files") || types.includes("application/x-moz-file");
+  }
+
+  function canDropImageSlotFile(slot, dataTransfer) {
+    const files = getDraggedFiles(dataTransfer);
+    if (!files.length) return true;
+    return files.some((file) => isSupportedImageSlotFile(slot, file));
+  }
+
+  function getFirstSupportedDroppedFile(slot, dataTransfer) {
+    const files = getDraggedFiles(dataTransfer);
+    return files.find((file) => isSupportedImageSlotFile(slot, file)) || null;
+  }
+
+  function getDraggedFiles(dataTransfer) {
+    if (!dataTransfer) return [];
+    const files = Array.from(dataTransfer.files || []).filter(Boolean);
+    if (files.length) return files;
+
+    return Array.from(dataTransfer.items || [])
+      .filter((item) => item.kind === "file")
+      .map((item) => item.getAsFile && item.getAsFile())
+      .filter(Boolean);
+  }
+
+  function isSupportedImageSlotFile(slot, file) {
+    if (!file) return false;
+    const extension = getFileExtension(file.name);
+    const isImage = String(file.type || "").startsWith("image/") || isDisplayableImageExtension(extension);
+    if (isImage) return true;
+    return isLogoSlot(slot) && isLogoSourceExtension(extension);
+  }
+
+  function clearImageSlotDragState(slot) {
+    if (!slot) return;
+    slot._dragDepth = 0;
+    slot.classList.remove("is-drag-over");
+  }
+
+  function clearAllImageSlotDragStates() {
+    document.querySelectorAll(".image-cell.is-drag-over").forEach(clearImageSlotDragState);
+  }
+
   function handleDocumentPaste(event) {
     const clipboard = event.clipboardData;
     if (!clipboard) return;
@@ -1907,6 +2049,10 @@
   async function saveProject() {
     try {
       ensureCurrentVersionSnapshot("保存SOP");
+      if (isFeishuLibraryActive()) {
+        await saveCurrentProjectToLibrary({ skipVersion: true });
+        return;
+      }
       const project = serializeProject({ includeHistory: true });
       if (projectState.fileHandle && projectState.fileHandle.createWritable) {
         await writeProjectToHandle(projectState.fileHandle, project);
@@ -2343,9 +2489,9 @@
   }
 
   async function initializeLibrary() {
-    if (!window.showDirectoryPicker || !window.indexedDB) {
+    if (!window.indexedDB) {
       libraryState.ready = false;
-      libraryStatusEl.textContent = "当前浏览器不支持直接授权电脑文件夹，请使用 Chrome 或 Edge。";
+      libraryStatusEl.textContent = "当前浏览器不支持本地 SOP库索引，请使用 Chrome 或 Edge。";
       updateLibraryControls();
       renderLibrary();
       return;
@@ -2354,6 +2500,17 @@
     try {
       libraryState.db = await openLibraryDb();
       libraryState.bomHistory = await loadBomHistory();
+      const storedMode = await loadLibraryStorageMode();
+      const storedFeishu = await loadStoredFeishuSettings();
+      if (storedFeishu) {
+        applyFeishuSettings(storedFeishu);
+      }
+      if (storedMode === STORAGE_MODE_FEISHU && isFeishuConfigured()) {
+        libraryState.storageMode = STORAGE_MODE_FEISHU;
+        await refreshFeishuLibrary({ silent: true });
+        return;
+      }
+
       const storedHandle = await loadStoredLibraryRoot();
       if (!storedHandle) {
         libraryStatusEl.textContent = "请选择一个电脑文件夹作为 SOP库。";
@@ -2422,8 +2579,10 @@
         id: "sop-library",
         mode: "readwrite"
       });
+      libraryState.storageMode = STORAGE_MODE_LOCAL;
       libraryState.rootHandle = handle;
       libraryState.rootName = handle.name || "SOP库";
+      await saveLibraryStorageMode(STORAGE_MODE_LOCAL);
       await saveStoredLibraryRoot(handle);
       await refreshLibrary({ requestPermission: true });
       libraryStatusEl.textContent = `已连接电脑文件夹：${libraryState.rootName}`;
@@ -2434,6 +2593,11 @@
   }
 
   async function refreshLibrary(options = {}) {
+    if (isFeishuLibraryActive()) {
+      await refreshFeishuLibrary(options);
+      return;
+    }
+
     if (!libraryState.rootHandle) {
       libraryState.ready = false;
       libraryStatusEl.textContent = "请先选择电脑文件夹。";
@@ -2583,10 +2747,16 @@
 
   function updateLibraryControls() {
     const supportsFolderAccess = Boolean(window.showDirectoryPicker && window.indexedDB);
-    libraryPickFolderButton.disabled = !supportsFolderAccess;
-    libraryRefreshFolderButton.disabled = !supportsFolderAccess || !libraryState.rootHandle;
-    libraryNewFolderButton.disabled = !libraryState.ready;
-    librarySaveCurrentButton.disabled = !libraryState.ready;
+    const feishuActive = isFeishuLibraryActive();
+    const feishuConfigured = isFeishuConfigured();
+    libraryPickFolderButton.disabled = !supportsFolderAccess || libraryState.busy;
+    libraryRefreshFolderButton.disabled = feishuActive || !supportsFolderAccess || !libraryState.rootHandle || libraryState.busy;
+    libraryNewFolderButton.disabled = feishuActive || !libraryState.ready || libraryState.busy;
+    librarySaveCurrentButton.disabled = !libraryState.ready || libraryState.busy;
+    feishuConnectButton.disabled = libraryState.busy;
+    feishuRefreshButton.disabled = !feishuConfigured || libraryState.busy;
+    feishuNewFolderButton.disabled = !feishuActive || !libraryState.ready || libraryState.busy;
+    feishuDisconnectButton.disabled = !feishuActive || libraryState.busy;
     bomPickFileButton.disabled = !supportsFolderAccess && !window.FileReader;
     bomClosePreviewButton.disabled = !libraryState.activeBom && bomPreviewPanel.hidden;
     batchPrintButton.disabled = !libraryState.ready || libraryState.busy || !getVisibleLibraryDocuments().length;
@@ -2594,10 +2764,10 @@
 
   function renderLibraryFolders() {
     libraryFolderListEl.replaceChildren();
-    if (!libraryState.rootHandle) {
+    if (!hasLibraryConnection()) {
       const empty = document.createElement("div");
       empty.className = "library-empty";
-      empty.textContent = "未选择电脑文件夹";
+      empty.textContent = "未连接电脑文件夹或飞书云盘";
       libraryFolderListEl.appendChild(empty);
       return;
     }
@@ -2697,10 +2867,10 @@
     const documents = getVisibleLibraryDocuments();
     libraryCountEl.textContent = String(documents.length);
 
-    if (!libraryState.rootHandle) {
+    if (!hasLibraryConnection()) {
       const empty = document.createElement("div");
       empty.className = "library-empty";
-      empty.textContent = "选择电脑文件夹后，这里会显示其中的 .sop.json 文件。";
+      empty.textContent = "连接电脑文件夹或飞书云盘后，这里会显示其中的 .sop.json 文件。";
       sopLibraryListEl.appendChild(empty);
       return;
     }
@@ -2758,6 +2928,10 @@
   }
 
   async function createLibraryFolder() {
+    if (isFeishuLibraryActive()) {
+      await createFeishuFolder();
+      return;
+    }
     if (!await ensureLibraryAccess(true)) return;
 
     const rawName = window.prompt("请输入文件夹名称", "新文件夹");
@@ -2909,6 +3083,34 @@
     libraryToggleButton.setAttribute("aria-expanded", String(!libraryState.collapsed));
     libraryToggleButton.setAttribute("aria-label", libraryState.collapsed ? "展开SOP库" : "折叠SOP库");
     schedulePreviewScaleUpdate();
+  }
+
+  function initializeFeishuPanelCollapse() {
+    let collapsed = true;
+    try {
+      const stored = window.localStorage.getItem(FEISHU_PANEL_COLLAPSED_KEY);
+      if (stored === "false") {
+        collapsed = false;
+      }
+    } catch (_) {
+      collapsed = true;
+    }
+    setFeishuPanelCollapsed(collapsed);
+  }
+
+  function setFeishuPanelCollapsed(collapsed, options = {}) {
+    const nextCollapsed = Boolean(collapsed);
+    feishuPanel.classList.toggle("is-collapsed", nextCollapsed);
+    feishuPanelBody.hidden = nextCollapsed;
+    feishuPanelToggle.setAttribute("aria-expanded", String(!nextCollapsed));
+
+    if (options.persist) {
+      try {
+        window.localStorage.setItem(FEISHU_PANEL_COLLAPSED_KEY, String(nextCollapsed));
+      } catch (_) {
+        // Ignore storage failures; the UI state still updates for this session.
+      }
+    }
   }
 
   function renderBomPreview(bom) {
@@ -3385,6 +3587,9 @@
 
   async function saveCurrentProjectToLibrary(options = {}) {
     if (!projectState.documentId || libraryState.busy) return false;
+    if (isFeishuLibraryActive()) {
+      return saveCurrentProjectToFeishu(options);
+    }
     if (!await ensureLibraryAccess(Boolean(options.requestPermission))) return false;
 
     libraryState.busy = true;
@@ -3430,7 +3635,7 @@
   }
 
   async function prepareCurrentProjectForSwitch() {
-    if (libraryState.rootHandle) {
+    if (hasLibraryConnection()) {
       return saveCurrentProjectToLibrary({
         reason: "切换前自动保存",
         silent: true,
@@ -3444,7 +3649,20 @@
     if (!libraryState.ready || fileId === projectState.libraryFileId) return;
 
     const documentItem = libraryState.documents.find((item) => item.id === fileId);
-    if (!documentItem || !documentItem.project) {
+    if (!documentItem) {
+      libraryStatusEl.textContent = "找不到这个 SOP 文件";
+      await refreshLibrary();
+      return;
+    }
+    if (!documentItem.project && documentItem.source === STORAGE_MODE_FEISHU) {
+      try {
+        documentItem.project = await loadFeishuProject(documentItem);
+      } catch (error) {
+        libraryStatusEl.textContent = `读取飞书 SOP 失败：${error.message || error}`;
+        return;
+      }
+    }
+    if (!documentItem.project) {
       libraryStatusEl.textContent = "找不到这个 SOP 文件";
       await refreshLibrary();
       return;
@@ -3456,7 +3674,7 @@
     await applyProject(documentItem.project, documentItem.name, null);
     projectState.folderId = documentItem.folderId || DEFAULT_FOLDER_ID;
     projectState.libraryFileId = documentItem.id;
-    projectState.libraryFileHandle = documentItem.fileHandle;
+    projectState.libraryFileHandle = documentItem.source === STORAGE_MODE_FEISHU ? null : documentItem.fileHandle;
     markClean();
     libraryState.activeFolderId = documentItem.folderId || DEFAULT_FOLDER_ID;
     await refreshLibrary();
@@ -3464,6 +3682,10 @@
   }
 
   async function renameLibraryDocument(fileId) {
+    if (isFeishuLibraryActive()) {
+      await renameFeishuDocument(fileId);
+      return;
+    }
     if (!await ensureLibraryAccess(true)) return;
     const documentItem = libraryState.documents.find((item) => item.id === fileId);
     if (!documentItem) return;
@@ -3499,6 +3721,10 @@
   }
 
   async function deleteLibraryDocument(fileId) {
+    if (isFeishuLibraryActive()) {
+      await deleteFeishuDocument(fileId);
+      return;
+    }
     if (!await ensureLibraryAccess(true)) return;
     const documentItem = libraryState.documents.find((item) => item.id === fileId);
     if (!documentItem) return;
@@ -3563,6 +3789,17 @@
   }
 
   async function ensureLibraryAccess(requestPermission) {
+    if (isFeishuLibraryActive()) {
+      if (!isFeishuConfigured()) {
+        libraryStatusEl.textContent = "请先填写飞书中转服务地址和飞书文件夹链接。";
+        return false;
+      }
+      if (!libraryState.ready && requestPermission) {
+        await refreshFeishuLibrary({ manual: true });
+      }
+      return libraryState.ready;
+    }
+
     if (!libraryState.rootHandle) {
       libraryStatusEl.textContent = "请先选择电脑文件夹。";
       return false;
@@ -3603,6 +3840,502 @@
       name: handle.name || "SOP库",
       updatedAt: new Date().toISOString()
     });
+  }
+
+  async function loadLibraryStorageMode() {
+    if (!libraryState.db) return STORAGE_MODE_LOCAL;
+    const record = await idbGet("settings", LIBRARY_STORAGE_MODE_SETTING_KEY);
+    return record && record.mode === STORAGE_MODE_FEISHU ? STORAGE_MODE_FEISHU : STORAGE_MODE_LOCAL;
+  }
+
+  async function saveLibraryStorageMode(mode) {
+    if (!libraryState.db) return;
+    await idbPut("settings", {
+      key: LIBRARY_STORAGE_MODE_SETTING_KEY,
+      mode,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  async function loadStoredFeishuSettings() {
+    if (!libraryState.db) return null;
+    const record = await idbGet("settings", FEISHU_SETTING_KEY);
+    return record && record.settings ? record.settings : null;
+  }
+
+  async function saveStoredFeishuSettings() {
+    if (!libraryState.db) return;
+    await idbPut("settings", {
+      key: FEISHU_SETTING_KEY,
+      settings: {
+        proxyUrl: libraryState.feishu.proxyUrl,
+        folderInput: libraryState.feishu.folderInput,
+        folderToken: libraryState.feishu.folderToken
+      },
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  function applyFeishuSettings(settings) {
+    libraryState.feishu.proxyUrl = normalizeFeishuProxyUrl(settings.proxyUrl);
+    libraryState.feishu.folderInput = String(settings.folderInput || "");
+    libraryState.feishu.folderToken = settings.folderToken || extractFeishuFolderToken(settings.folderInput);
+    feishuProxyUrlInput.value = libraryState.feishu.proxyUrl;
+    feishuFolderLinkInput.value = libraryState.feishu.folderInput;
+  }
+
+  async function connectFeishuLibrary() {
+    const proxyUrl = normalizeFeishuProxyUrl(feishuProxyUrlInput.value);
+    const folderInput = String(feishuFolderLinkInput.value || "").trim();
+    const folderToken = extractFeishuFolderToken(folderInput);
+
+    if (!proxyUrl || !folderToken) {
+      libraryStatusEl.textContent = "请填写飞书中转服务地址和飞书文件夹链接。";
+      updateLibraryControls();
+      return;
+    }
+
+    libraryState.storageMode = STORAGE_MODE_FEISHU;
+    libraryState.rootName = "飞书云盘";
+    libraryState.feishu.proxyUrl = proxyUrl;
+    libraryState.feishu.folderInput = folderInput;
+    libraryState.feishu.folderToken = folderToken;
+    await saveLibraryStorageMode(STORAGE_MODE_FEISHU);
+    await saveStoredFeishuSettings();
+    await refreshFeishuLibrary({ manual: true });
+  }
+
+  async function disconnectFeishuLibrary() {
+    libraryState.storageMode = STORAGE_MODE_LOCAL;
+    libraryState.feishu.connected = false;
+    libraryState.documents = [];
+    libraryState.folders = [];
+    libraryState.boms = [];
+    libraryState.activeFolderId = ALL_FOLDER_ID;
+    await saveLibraryStorageMode(STORAGE_MODE_LOCAL);
+
+    if (libraryState.rootHandle) {
+      await refreshLibrary({ requestPermission: false });
+      libraryStatusEl.textContent = `已切回电脑文件夹：${libraryState.rootName}`;
+      return;
+    }
+
+    libraryState.ready = false;
+    libraryStatusEl.textContent = "已断开飞书云盘，请选择电脑文件夹或重新连接飞书。";
+    updateLibraryControls();
+    renderLibrary();
+  }
+
+  async function refreshFeishuLibrary(options = {}) {
+    applyFeishuSettings({
+      proxyUrl: feishuProxyUrlInput.value || libraryState.feishu.proxyUrl,
+      folderInput: feishuFolderLinkInput.value || libraryState.feishu.folderInput,
+      folderToken: extractFeishuFolderToken(feishuFolderLinkInput.value || libraryState.feishu.folderInput)
+    });
+
+    if (!isFeishuConfigured()) {
+      libraryState.ready = false;
+      libraryState.feishu.connected = false;
+      if (!options.silent) {
+        libraryStatusEl.textContent = "请先填写飞书中转服务地址和飞书文件夹链接。";
+      }
+      updateLibraryControls();
+      renderLibrary();
+      return;
+    }
+
+    libraryState.storageMode = STORAGE_MODE_FEISHU;
+    libraryState.busy = true;
+    updateLibraryControls();
+    if (!options.silent) {
+      libraryStatusEl.textContent = "正在读取飞书云盘 SOP库...";
+    }
+
+    try {
+      await saveLibraryStorageMode(STORAGE_MODE_FEISHU);
+      await saveStoredFeishuSettings();
+      const payload = await feishuRequest(`/library?folderToken=${encodeURIComponent(libraryState.feishu.folderToken)}`);
+      const normalized = normalizeFeishuLibraryPayload(payload);
+      libraryState.ready = true;
+      libraryState.feishu.connected = true;
+      libraryState.rootName = normalized.rootName;
+      libraryState.folders = normalized.folders;
+      libraryState.documents = normalized.documents;
+      libraryState.boms = normalized.boms;
+      if (
+        libraryState.activeFolderId !== ALL_FOLDER_ID &&
+        !libraryState.folders.some((folder) => folder.id === libraryState.activeFolderId)
+      ) {
+        libraryState.activeFolderId = ALL_FOLDER_ID;
+      }
+      renderLibrary();
+      if (!options.silent) {
+        libraryStatusEl.textContent = `已连接飞书云盘：${libraryState.rootName}`;
+      }
+    } catch (error) {
+      libraryState.ready = false;
+      libraryState.feishu.connected = false;
+      libraryStatusEl.textContent = error.loginUrl ?
+        `飞书未授权，请先打开授权地址：${error.loginUrl}` :
+        `飞书云盘读取失败：${error.message || error}`;
+      updateLibraryControls();
+      renderLibrary();
+    } finally {
+      libraryState.busy = false;
+      updateLibraryControls();
+    }
+  }
+
+  async function saveCurrentProjectToFeishu(options = {}) {
+    if (!await ensureFeishuAccess(Boolean(options.requestPermission))) return false;
+
+    libraryState.busy = true;
+    updateLibraryControls();
+    try {
+      if (!options.skipVersion) {
+        ensureCurrentVersionSnapshot(options.reason || "保存到飞书云盘");
+      }
+      if (options.assignActiveFolder && libraryState.activeFolderId !== ALL_FOLDER_ID) {
+        projectState.folderId = libraryState.activeFolderId || DEFAULT_FOLDER_ID;
+        projectState.libraryFileId = "";
+        projectState.libraryFileHandle = null;
+      }
+
+      const folderId = normalizeLibraryFolderId(projectState.folderId);
+      const folderCloudId = getFeishuFolderCloudId(folderId);
+      const fileName = normalizeProjectFileName(projectState.fileName);
+      const project = serializeProject({ includeHistory: true });
+      const currentDocument = libraryState.documents.find((item) => item.id === projectState.libraryFileId);
+      let savedItem;
+
+      if (currentDocument && currentDocument.cloudId) {
+        savedItem = await feishuRequest(`/files/${encodeURIComponent(currentDocument.cloudId)}`, {
+          method: "PUT",
+          body: {
+            folderId: folderCloudId,
+            fileName,
+            project
+          }
+        });
+      } else {
+        savedItem = await feishuRequest("/files", {
+          method: "POST",
+          body: {
+            folderId: folderCloudId,
+            fileName,
+            project
+          }
+        });
+      }
+
+      const documentItem = normalizeFeishuDocument(savedItem && (savedItem.document || savedItem.file || savedItem), folderId);
+      projectState.folderId = documentItem.folderId || folderId;
+      projectState.fileName = documentItem.fileName || fileName;
+      projectState.libraryFileId = documentItem.id;
+      projectState.libraryFileHandle = null;
+      markClean();
+      await refreshFeishuLibrary({ silent: true });
+      if (!options.silent) {
+        libraryStatusEl.textContent = `已保存到飞书云盘：${removeProjectExtension(projectState.fileName)}`;
+      }
+      return true;
+    } catch (error) {
+      libraryStatusEl.textContent = `保存到飞书云盘失败：${error.message || error}`;
+      return false;
+    } finally {
+      libraryState.busy = false;
+      updateLibraryControls();
+    }
+  }
+
+  async function ensureFeishuAccess(requestRefresh) {
+    if (!isFeishuConfigured()) {
+      libraryStatusEl.textContent = "请先填写飞书中转服务地址和飞书文件夹链接。";
+      return false;
+    }
+    if (!libraryState.ready && requestRefresh) {
+      await refreshFeishuLibrary({ manual: true });
+    }
+    return libraryState.ready;
+  }
+
+  async function loadFeishuProject(documentItem) {
+    if (documentItem.project) return documentItem.project;
+    const cloudId = documentItem.cloudId || removeFeishuIdPrefix(documentItem.id);
+    const payload = await feishuRequest(`/files/${encodeURIComponent(cloudId)}`);
+    const project = payload && payload.project ? payload.project : payload;
+    validateProjectFile(project);
+    return project;
+  }
+
+  async function createFeishuFolder() {
+    if (!await ensureFeishuAccess(true)) return;
+
+    const rawName = window.prompt("请输入飞书文件夹名称", "新文件夹");
+    if (rawName === null) return;
+    const name = sanitizeLibraryName(rawName);
+    if (!name) return;
+
+    libraryState.busy = true;
+    updateLibraryControls();
+    try {
+      const parentId = getLibraryFolderForNewSop();
+      const parentCloudId = getFeishuFolderCloudId(parentId);
+      const payload = await feishuRequest("/folders", {
+        method: "POST",
+        body: {
+          parentId: parentCloudId,
+          name
+        }
+      });
+      const folder = normalizeFeishuFolder(payload && (payload.folder || payload), parentId);
+      await refreshFeishuLibrary({ silent: true });
+      libraryState.activeFolderId = folder.id || parentId;
+      renderLibrary();
+      libraryStatusEl.textContent = `已在飞书云盘中新建：${name}`;
+    } catch (error) {
+      libraryStatusEl.textContent = `新建飞书文件夹失败：${error.message || error}`;
+    } finally {
+      libraryState.busy = false;
+      updateLibraryControls();
+    }
+  }
+
+  async function renameFeishuDocument(fileId) {
+    if (!await ensureFeishuAccess(true)) return;
+    const documentItem = libraryState.documents.find((item) => item.id === fileId);
+    if (!documentItem) return;
+
+    const rawName = window.prompt("请输入新的SOP名称", removeProjectExtension(documentItem.name || ""));
+    if (rawName === null) return;
+    const name = normalizeProjectFileName(sanitizeLibraryName(rawName));
+    if (!name || name === documentItem.fileName) return;
+
+    libraryState.busy = true;
+    updateLibraryControls();
+    try {
+      await feishuRequest(`/files/${encodeURIComponent(documentItem.cloudId)}`, {
+        method: "PATCH",
+        body: {
+          fileName: name,
+          folderId: getFeishuFolderCloudId(documentItem.folderId)
+        }
+      });
+      if (projectState.libraryFileId === fileId) {
+        projectState.fileName = name;
+      }
+      await refreshFeishuLibrary({ silent: true });
+      libraryStatusEl.textContent = `已重命名飞书 SOP：${removeProjectExtension(name)}`;
+    } catch (error) {
+      libraryStatusEl.textContent = `飞书重命名失败：${error.message || error}`;
+    } finally {
+      libraryState.busy = false;
+      updateLibraryControls();
+    }
+  }
+
+  async function deleteFeishuDocument(fileId) {
+    if (!await ensureFeishuAccess(true)) return;
+    const documentItem = libraryState.documents.find((item) => item.id === fileId);
+    if (!documentItem) return;
+
+    const ok = window.confirm(`确定删除飞书云盘里的“${documentItem.fileName}”？`);
+    if (!ok) return;
+
+    libraryState.busy = true;
+    updateLibraryControls();
+    try {
+      await feishuRequest(`/files/${encodeURIComponent(documentItem.cloudId)}`, { method: "DELETE" });
+      if (projectState.libraryFileId === fileId) {
+        isApplyingProject = true;
+        pagesEl.replaceChildren();
+        resetRuntimeCounters();
+        addPage();
+        isApplyingProject = false;
+        initializeProjectState("未命名.sop.json", null, { folderId: getLibraryFolderForNewSop() });
+      }
+      await refreshFeishuLibrary({ silent: true });
+      libraryStatusEl.textContent = "已删除飞书云盘中的 SOP 文件";
+    } catch (error) {
+      libraryStatusEl.textContent = `飞书删除失败：${error.message || error}`;
+    } finally {
+      libraryState.busy = false;
+      updateLibraryControls();
+    }
+  }
+
+  async function feishuRequest(path, options = {}) {
+    const baseUrl = normalizeFeishuProxyUrl(libraryState.feishu.proxyUrl);
+    const url = `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+    const init = {
+      method: options.method || "GET",
+      credentials: "include",
+      headers: {
+        "Accept": "application/json"
+      }
+    };
+
+    if (options.body !== undefined) {
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(options.body);
+    }
+
+    const response = await fetch(url, init);
+    const text = await response.text();
+    let payload = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch (_) {
+        payload = { message: text };
+      }
+    }
+
+    if (!response.ok) {
+      const message = payload && (payload.error || payload.message) ? payload.error || payload.message : response.statusText;
+      const error = new Error(message || `HTTP ${response.status}`);
+      if (payload && payload.loginUrl) {
+        error.loginUrl = payload.loginUrl;
+      }
+      throw error;
+    }
+    return payload || {};
+  }
+
+  function normalizeFeishuLibraryPayload(payload) {
+    const rootName = String(payload.rootName || payload.name || "飞书云盘");
+    const folders = [
+      {
+        id: DEFAULT_FOLDER_ID,
+        cloudId: payload.rootId || libraryState.feishu.folderToken,
+        name: rootName,
+        path: "",
+        source: STORAGE_MODE_FEISHU,
+        system: true
+      }
+    ];
+    const seenFolders = new Set([DEFAULT_FOLDER_ID]);
+    const rawFolders = Array.isArray(payload.folders) ? payload.folders : [];
+    rawFolders.forEach((item) => {
+      const folder = normalizeFeishuFolder(item, DEFAULT_FOLDER_ID);
+      if (!seenFolders.has(folder.id)) {
+        seenFolders.add(folder.id);
+        folders.push(folder);
+      }
+    });
+
+    const rawDocuments = Array.isArray(payload.documents) ? payload.documents :
+      Array.isArray(payload.files) ? payload.files : [];
+    const documents = rawDocuments
+      .map((item) => normalizeFeishuDocument(item, DEFAULT_FOLDER_ID))
+      .filter((item) => isProjectFileName(item.fileName));
+
+    const rawBoms = Array.isArray(payload.boms) ? payload.boms : [];
+    const boms = rawBoms.map((item) => ({
+      id: createFeishuId(item.id || item.fileToken || item.token || item.fileName || item.name),
+      cloudId: item.id || item.fileToken || item.token || "",
+      name: item.name || item.fileName || "BOM",
+      folderId: item.folderId ? createFeishuId(item.folderId) : DEFAULT_FOLDER_ID,
+      folderPath: item.folderPath || "",
+      fileName: item.fileName || item.name || "BOM",
+      updatedAt: item.updatedAt || item.modifiedAt || "",
+      source: STORAGE_MODE_FEISHU
+    })).filter((item) => isBomFileName(item.fileName));
+
+    folders.sort((a, b) => {
+      if (a.id === DEFAULT_FOLDER_ID) return -1;
+      if (b.id === DEFAULT_FOLDER_ID) return 1;
+      return String(a.path || a.name).localeCompare(String(b.path || b.name), "zh-Hans-CN");
+    });
+    documents.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+    return { rootName, folders, documents, boms };
+  }
+
+  function normalizeFeishuFolder(item, fallbackParentId) {
+    const rawId = item && (item.id || item.folderId || item.folderToken || item.token);
+    const id = rawId ? createFeishuId(rawId) : DEFAULT_FOLDER_ID;
+    return {
+      id,
+      cloudId: rawId || "",
+      parentId: item && item.parentId ? createFeishuId(item.parentId) : fallbackParentId,
+      name: item && item.name ? item.name : "未命名文件夹",
+      path: item && item.path ? item.path : "",
+      source: STORAGE_MODE_FEISHU,
+      system: false
+    };
+  }
+
+  function normalizeFeishuDocument(item, fallbackFolderId) {
+    const rawId = item && (item.id || item.fileId || item.fileToken || item.token);
+    const fileName = normalizeProjectFileName(item && (item.fileName || item.name || projectState.fileName));
+    const folderId = item && item.folderId ? createFeishuId(item.folderId) : fallbackFolderId;
+    const project = item && item.project ? item.project : null;
+    return {
+      id: createFeishuId(rawId || `${folderId}::${fileName}`),
+      cloudId: rawId || "",
+      documentId: item && item.documentId ? item.documentId : project && project.document ? project.document.id : "",
+      name: fileName,
+      folderId,
+      folderPath: item && item.folderPath ? item.folderPath : "",
+      fileName,
+      fileHandle: null,
+      folderHandle: null,
+      currentVersion: Number(item && item.currentVersion) || Number(project && project.document && project.document.currentVersion) || 1,
+      lastVersion: Number(item && item.lastVersion) || Number(project && project.document && project.document.lastVersion) || 1,
+      pageCount: Number(item && item.pageCount) || (project && Array.isArray(project.pages) ? project.pages.length : 0),
+      updatedAt: item && (item.updatedAt || item.modifiedAt || item.savedAt) || project && project.savedAt || "",
+      project,
+      source: STORAGE_MODE_FEISHU
+    };
+  }
+
+  function createFeishuId(value) {
+    const id = String(value || "").trim();
+    return id.startsWith("feishu::") ? id : `feishu::${id}`;
+  }
+
+  function removeFeishuIdPrefix(value) {
+    return String(value || "").replace(/^feishu::/, "");
+  }
+
+  function normalizeFeishuProxyUrl(value) {
+    return String(value || "").trim().replace(/\/+$/, "");
+  }
+
+  function extractFeishuFolderToken(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    try {
+      const url = new URL(raw);
+      const pathMatch = url.pathname.match(/\/drive\/folder\/([^/?#]+)/i);
+      if (pathMatch) return decodeURIComponent(pathMatch[1]);
+      const queryToken = url.searchParams.get("folder_token") || url.searchParams.get("token");
+      if (queryToken) return queryToken;
+    } catch (_) {
+      // Plain folder tokens are accepted.
+    }
+    const match = raw.match(/(?:drive\/folder\/|folder_token=|token=)([A-Za-z0-9_-]+)/i);
+    if (match) return match[1];
+    return raw;
+  }
+
+  function isFeishuConfigured() {
+    return Boolean(libraryState.feishu.proxyUrl && libraryState.feishu.folderToken);
+  }
+
+  function isFeishuLibraryActive() {
+    return libraryState.storageMode === STORAGE_MODE_FEISHU;
+  }
+
+  function hasLibraryConnection() {
+    return isFeishuLibraryActive() ? isFeishuConfigured() : Boolean(libraryState.rootHandle);
+  }
+
+  function getFeishuFolderCloudId(folderId) {
+    const folder = getLibraryFolder(folderId);
+    if (folder && folder.cloudId) return folder.cloudId;
+    if (!folderId || folderId === DEFAULT_FOLDER_ID) return libraryState.feishu.folderToken;
+    return removeFeishuIdPrefix(folderId);
   }
 
   async function getAvailableProjectFileName(folderHandle, preferredName) {
@@ -3682,7 +4415,24 @@
 
     if (!await ensureLibraryAccess(true)) return;
 
-    const documents = getVisibleLibraryDocuments().filter((documentItem) => documentItem.project);
+    const rawDocuments = getVisibleLibraryDocuments();
+    const currentProject = serializeProject({ includeHistory: true });
+    const documents = [];
+    for (const documentItem of rawDocuments) {
+      const shouldUseCurrentProject = isCurrentLibraryDocument(documentItem);
+      let project = shouldUseCurrentProject ? currentProject : documentItem.project;
+      if (!project && documentItem.source === STORAGE_MODE_FEISHU) {
+        libraryStatusEl.textContent = `正在读取飞书 SOP：${removeProjectExtension(documentItem.name)}`;
+        project = await loadFeishuProject(documentItem);
+        documentItem.project = project;
+      }
+      if (project) {
+        documents.push({
+          ...documentItem,
+          project
+        });
+      }
+    }
     if (!documents.length) {
       libraryStatusEl.textContent = "当前筛选范围没有可批量导出的 SOP。";
       updateLibraryControls();
@@ -3690,14 +4440,7 @@
     }
 
     const restore = captureProjectForBatchPrint();
-    const currentProject = serializeProject({ includeHistory: true });
-    const printDocuments = documents.map((documentItem) => {
-      const shouldUseCurrentProject = isCurrentLibraryDocument(documentItem);
-      return {
-        ...documentItem,
-        project: shouldUseCurrentProject ? currentProject : documentItem.project
-      };
-    });
+    const printDocuments = documents;
     const scopeName = getBatchPrintScopeName();
     const totalPages = printDocuments.reduce((sum, documentItem) => {
       return sum + getProjectPageCount(documentItem.project);

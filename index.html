@@ -79,6 +79,30 @@
         <button class="library-action-button" id="library-new-folder" type="button">新建文件夹</button>
         <button class="library-action-button" id="library-save-current" type="button">保存当前</button>
       </div>
+      <section class="cloud-panel is-collapsed" id="feishu-panel">
+        <button class="library-collapse-toggle" id="feishu-panel-toggle" type="button" aria-expanded="false" aria-controls="feishu-panel-body">
+          <span>飞书云盘</span>
+          <span class="collapse-indicator" aria-hidden="true">&gt;</span>
+        </button>
+        <div class="cloud-panel-body" id="feishu-panel-body" hidden>
+          <div class="cloud-config">
+            <label class="library-field" for="feishu-proxy-url">
+              <span>中转服务地址</span>
+              <input id="feishu-proxy-url" type="url" placeholder="http://127.0.0.1:8787">
+            </label>
+            <label class="library-field" for="feishu-folder-link">
+              <span>飞书文件夹链接或Token</span>
+              <input id="feishu-folder-link" type="text" placeholder="https://xxx.feishu.cn/drive/folder/...">
+            </label>
+          </div>
+          <div class="library-actions">
+            <button class="library-action-button primary" id="feishu-connect" type="button">连接飞书</button>
+            <button class="library-action-button" id="feishu-refresh" type="button">刷新云盘</button>
+            <button class="library-action-button" id="feishu-new-folder" type="button">新建云盘文件夹</button>
+            <button class="library-action-button" id="feishu-disconnect" type="button">断开飞书</button>
+          </div>
+        </div>
+      </section>
       <div class="library-section-title">文件夹</div>
       <div class="folder-list" id="library-folder-list"></div>
       <div class="library-section-title">BOM表</div>

@@ -396,11 +396,99 @@ button {
   border-color: #93c5fd;
 }
 
+.library-action-button:disabled {
+  color: #94a3b8;
+  background: #f1f5f9;
+  border-color: #d4dbe5;
+  cursor: not-allowed;
+}
+
 .library-section-title {
   padding-top: 2px;
   color: #475569;
   font-size: 12px;
   font-weight: 700;
+}
+
+.cloud-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.library-collapse-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  color: #1f2937;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid #b9c2cf;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.library-collapse-toggle:hover {
+  background: #eef4ff;
+  border-color: #8bb8ff;
+}
+
+.library-collapse-toggle span:first-child {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.collapse-indicator {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  color: #475569;
+  font-weight: 700;
+  transition: transform 0.16s ease;
+}
+
+.cloud-panel:not(.is-collapsed) .collapse-indicator {
+  transform: rotate(90deg);
+}
+
+.cloud-panel-body {
+  display: grid;
+  gap: 8px;
+}
+
+.cloud-panel-body[hidden] {
+  display: none;
+}
+
+.cloud-config {
+  display: grid;
+  gap: 8px;
+}
+
+.library-field {
+  display: grid;
+  gap: 4px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.library-field input {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  color: #111827;
+  background: #ffffff;
+  border: 1px solid #b9c2cf;
+  border-radius: 6px;
+}
+
+.library-field input:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.28);
+  border-color: #60a5fa;
 }
 
 .folder-list {
@@ -840,6 +928,18 @@ button {
   z-index: 5;
   outline: 2px solid var(--focus);
   outline-offset: -2px;
+}
+
+.image-cell.is-drag-over {
+  z-index: 7;
+  outline: 3px solid #0ea5e9;
+  outline-offset: -3px;
+  box-shadow: inset 0 0 0 999px rgba(14, 165, 233, 0.12);
+}
+
+.image-cell.is-drag-over .image-empty {
+  color: #075985;
+  font-weight: 700;
 }
 
 .note-cell {

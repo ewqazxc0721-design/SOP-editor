@@ -21,3 +21,19 @@ https://<owner>.github.io/<repo>/
 ```text
 https://<owner>.github.io/
 ```
+
+## Feishu Drive first version
+
+The SOP library can be connected to a Feishu Drive folder through a proxy service. The static page does not store Feishu `app_secret`; OAuth, token refresh, and Feishu OpenAPI calls must be handled by the proxy service.
+
+Expected proxy API:
+
+- `GET /library?folderToken=xxx`: returns `{ rootName, rootId, folders, documents, boms }`
+- `GET /files/:fileId`: returns a SOP JSON object, or `{ project }`
+- `POST /files`: accepts `{ folderId, fileName, project }` to create a SOP
+- `PUT /files/:fileId`: accepts `{ folderId, fileName, project }` to overwrite a SOP
+- `PATCH /files/:fileId`: accepts `{ fileName }` to rename a SOP
+- `DELETE /files/:fileId`: deletes a SOP
+- `POST /folders`: accepts `{ parentId, name }` to create a folder
+
+`documents` should contain `.sop.json` files. If a document list item does not include `project`, the page will call `GET /files/:fileId` when opening or batch-exporting that SOP.
