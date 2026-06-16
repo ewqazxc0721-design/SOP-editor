@@ -9,6 +9,7 @@
   const exportPptxButton = document.getElementById("export-pptx");
   const batchExportPptxButton = document.getElementById("batch-export-pptx");
   const appShellEl = document.querySelector(".app-shell");
+  const workspaceEl = document.querySelector(".workspace");
   const libraryPanelEl = document.querySelector(".library-panel");
   const libraryToggleButton = document.getElementById("library-toggle");
   const appVersionEl = document.getElementById("app-version");
@@ -60,7 +61,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.6.8";
+  const APP_VERSION = "1.6.9";
   const SOP_SCHEMA_VERSION = 2;
   const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
   const PRESET_OVERLAY_COLORS = [
@@ -368,6 +369,9 @@
   window.addEventListener("afterprint", restorePendingBatchPrint);
 
   window.addEventListener("scroll", queueCurrentPageSync, { passive: true });
+  if (workspaceEl) {
+    workspaceEl.addEventListener("scroll", queueCurrentPageSync, { passive: true });
+  }
   window.addEventListener("resize", () => {
     schedulePreviewScaleUpdate();
     document.querySelectorAll(".image-cell[data-has-image='true']").forEach((slot) => {
@@ -7319,7 +7323,10 @@
     const pages = getPages();
     if (!pages.length) return;
 
-    const viewportCenter = window.innerHeight / 2;
+    const viewportRect = workspaceEl ? workspaceEl.getBoundingClientRect() : null;
+    const viewportCenter = viewportRect ?
+      viewportRect.top + viewportRect.height / 2 :
+      window.innerHeight / 2;
     let bestPage = pages[0];
     let bestDistance = Number.POSITIVE_INFINITY;
 
