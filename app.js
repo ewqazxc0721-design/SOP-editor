@@ -7801,7 +7801,7 @@
     globalInfoPanelToggle.className = "library-collapse-toggle";
     globalInfoPanelToggle.id = "global-info-panel-toggle";
     globalInfoPanelToggle.type = "button";
-    globalInfoPanelToggle.setAttribute("aria-expanded", "true");
+    globalInfoPanelToggle.setAttribute("aria-expanded", "false");
     globalInfoPanelToggle.setAttribute("aria-controls", "global-info-panel-body");
     globalInfoPanelToggle.innerHTML = `
       <span>全局信息</span>
@@ -7826,14 +7826,14 @@
   }
 
   function initializeGlobalInfoPanelCollapse() {
-    let collapsed = false;
+    let collapsed = true;
     try {
       const stored = window.localStorage.getItem(GLOBAL_INFO_PANEL_COLLAPSED_KEY);
       if (stored !== null) {
         collapsed = stored === "true";
       }
     } catch (_) {
-      collapsed = false;
+      collapsed = true;
     }
     setGlobalInfoPanelCollapsed(collapsed);
   }
