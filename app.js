@@ -8,6 +8,10 @@
   const batchPrintButton = document.getElementById("batch-print-pages");
   const exportPptxButton = document.getElementById("export-pptx");
   const batchExportPptxButton = document.getElementById("batch-export-pptx");
+  let addPageTemplateMenu = null;
+  let exportPanel = null;
+  let exportPanelToggle = null;
+  let exportPanelBody = null;
   const appShellEl = document.querySelector(".app-shell");
   const workspaceEl = document.querySelector(".workspace");
   const libraryPanelEl = document.querySelector(".library-panel");
@@ -20,6 +24,9 @@
   const saveAsFileButton = document.getElementById("save-as-file");
   const createVersionButton = document.getElementById("create-version");
   const versionSelect = document.getElementById("version-select");
+  let versionPanel = null;
+  let versionPanelToggle = null;
+  let versionPanelBody = null;
   const openProjectInput = document.getElementById("open-project-input");
   const libraryCountEl = document.getElementById("library-count");
   const libraryStatusEl = document.getElementById("library-status");
@@ -38,10 +45,16 @@
   const feishuPanelBody = document.getElementById("feishu-panel-body");
   const libraryFolderListEl = document.getElementById("library-folder-list");
   const sopLibraryListEl = document.getElementById("sop-library-list");
+  let sopHistoryPanel = null;
+  let sopHistoryPanelToggle = null;
+  let sopHistoryPanelBody = null;
   const bomPickFileButton = document.getElementById("bom-pick-file");
   const bomClosePreviewButton = document.getElementById("bom-close-preview");
   const bomFileInput = document.getElementById("bom-file-input");
   const bomHistoryListEl = document.getElementById("bom-history-list");
+  let bomPanel = null;
+  let bomPanelToggle = null;
+  let bomPanelBody = null;
   const bomPreviewPanel = document.getElementById("bom-preview-panel");
   const bomPreviewTitle = document.getElementById("bom-preview-title");
   const bomPreviewMeta = document.getElementById("bom-preview-meta");
@@ -61,7 +74,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.6.12";
+  const APP_VERSION = "1.6.31";
   const SOP_SCHEMA_VERSION = 2;
   const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
   const PRESET_OVERLAY_COLORS = [
@@ -95,6 +108,11 @@
   const LIBRARY_STORAGE_MODE_SETTING_KEY = "libraryStorageMode";
   const FEISHU_SETTING_KEY = "feishuLibrary";
   const FEISHU_PANEL_COLLAPSED_KEY = "sop-feishu-panel-collapsed";
+  const EXPORT_PANEL_COLLAPSED_KEY = "sop-export-panel-collapsed";
+  const VERSION_PANEL_COLLAPSED_KEY = "sop-version-panel-collapsed";
+  const BOM_PANEL_COLLAPSED_KEY = "sop-bom-panel-collapsed";
+  const SOP_HISTORY_PANEL_COLLAPSED_KEY = "sop-history-panel-collapsed";
+  const FOLDER_TREE_EXPANDED_KEY = "sop-folder-tree-expanded";
   const STORAGE_MODE_LOCAL = "local";
   const STORAGE_MODE_FEISHU = "feishu";
   const BOM_HISTORY_LIMIT = 12;
@@ -102,6 +120,7 @@
   const logoSourceExtensions = [".ai", ".eps", ".pdf"];
   const bomFileExtensions = [".xlsx", ".xls", ".csv", ".tsv", ".txt", ".json"];
   const STEP_CARD_DRAG_MIME = "application/x-sop-step-card";
+  const MATERIAL_CARD_DRAG_MIME = "application/x-sop-material-card";
   const STEP_CARD_GROUPS = [
     { imageKey: "c5r2", descKey: "c5r11", noteKey: "c5r13" },
     { imageKey: "c8r2", descKey: "c8r11", noteKey: "c8r13" },
@@ -112,6 +131,38 @@
     { imageKey: "c11r14", descKey: "c11r23", noteKey: "c11r25" },
     { imageKey: "c14r14", descKey: "c14r23", noteKey: "c14r25" }
   ];
+  const STEP_TEMPLATE_COUNTS = [4, 6, 8];
+  const DEFAULT_STEP_TEMPLATE_COUNT = 8;
+  const STEP_CARD_CELL_KEYS = new Set(STEP_CARD_GROUPS.flatMap((group) => [group.imageKey, group.descKey, group.noteKey]));
+  const STEP_TEMPLATE_LAYOUTS = {
+    4: {
+      columns: [{ col: 5, span: 6 }, { col: 11, span: 6 }],
+      rows: [
+        { imageRow: 2, descRow: 11, noteRow: 13 },
+        { imageRow: 14, descRow: 23, noteRow: 25 }
+      ]
+    },
+    6: {
+      columns: [{ col: 5, span: 4 }, { col: 9, span: 4 }, { col: 13, span: 4 }],
+      rows: [
+        { imageRow: 2, descRow: 11, noteRow: 13 },
+        { imageRow: 14, descRow: 23, noteRow: 25 }
+      ]
+    },
+    8: {
+      columns: [{ col: 5, span: 3 }, { col: 8, span: 3 }, { col: 11, span: 3 }, { col: 14, span: 3 }],
+      rows: [
+        { imageRow: 2, descRow: 11, noteRow: 13 },
+        { imageRow: 14, descRow: 23, noteRow: 25 }
+      ]
+    }
+  };
+  const MATERIAL_CARD_GROUPS = [3, 6, 9, 12, 15, 18, 21, 24].map((row) => ({
+    imageKey: `c1r${row}`,
+    nameKey: `c3r${row}`,
+    numberKey: `c3r${row + 1}`,
+    specKey: `c3r${row + 2}`
+  }));
 
   let nextPageId = 1;
   let currentPageId = null;
@@ -122,6 +173,10 @@
   let stepCardPointerDrag = null;
   let selectedStepCard = null;
   let stepCardClipboard = null;
+  let draggedMaterialCard = null;
+  let materialCardPointerDrag = null;
+  let selectedMaterialCard = null;
+  let materialCardClipboard = null;
   let nextAnnotationLayerId = 1;
   let nextOverlayId = 1;
   let scrollTicking = false;
@@ -153,6 +208,7 @@
     bomHistory: [],
     activeBom: null,
     activeFolderId: ALL_FOLDER_ID,
+    expandedFolderIds: new Set([DEFAULT_FOLDER_ID]),
     collapsed: false,
     busy: false,
     feishu: {
@@ -312,12 +368,38 @@
     }));
   });
 
-  addPageButton.addEventListener("click", () => addPage({ scrollIntoView: true }));
+  buildExportCollapsePanel();
+  buildVersionCollapsePanel();
+  buildBomCollapsePanel();
+  buildSopHistoryCollapsePanel();
+  buildAddPageTemplateMenu();
+
+  addPageButton.addEventListener("click", () => addPage({ scrollIntoView: true, stepTemplateCount: DEFAULT_STEP_TEMPLATE_COUNT }));
   deletePageButton.addEventListener("click", deleteCurrentPage);
   printButton.addEventListener("click", exportPdf);
   batchPrintButton.addEventListener("click", batchExportPdf);
   exportPptxButton.addEventListener("click", exportPptx);
   batchExportPptxButton.addEventListener("click", batchExportPptx);
+  if (exportPanelToggle) {
+    exportPanelToggle.addEventListener("click", () => {
+      setExportPanelCollapsed(!exportPanel.classList.contains("is-collapsed"), { persist: true });
+    });
+  }
+  if (versionPanelToggle) {
+    versionPanelToggle.addEventListener("click", () => {
+      setVersionPanelCollapsed(!versionPanel.classList.contains("is-collapsed"), { persist: true });
+    });
+  }
+  if (bomPanelToggle) {
+    bomPanelToggle.addEventListener("click", () => {
+      setBomPanelCollapsed(!bomPanel.classList.contains("is-collapsed"), { persist: true });
+    });
+  }
+  if (sopHistoryPanelToggle) {
+    sopHistoryPanelToggle.addEventListener("click", () => {
+      setSopHistoryPanelCollapsed(!sopHistoryPanel.classList.contains("is-collapsed"), { persist: true });
+    });
+  }
   newFileButton.addEventListener("click", newProject);
   openFileButton.addEventListener("click", openProjectFile);
   saveFileButton.addEventListener("click", saveProject);
@@ -375,11 +457,28 @@
   document.addEventListener("dragend", clearAllImageSlotDragStates, true);
   document.addEventListener("keydown", handleDocumentKeyDown);
   document.addEventListener("pointerdown", handleGlobalBlankPointerDown);
+  document.addEventListener("pointermove", handleStepCardPointerMove, true);
+  document.addEventListener("pointerup", endStepCardPointerDrag, true);
+  document.addEventListener("pointercancel", endStepCardPointerDrag, true);
+  document.addEventListener("mousemove", handleStepCardPointerMove, true);
+  document.addEventListener("mouseup", endStepCardPointerDrag, true);
+  document.addEventListener("pointermove", handleMaterialCardPointerMove, true);
+  document.addEventListener("pointerup", endMaterialCardPointerDrag, true);
+  document.addEventListener("pointercancel", endMaterialCardPointerDrag, true);
+  document.addEventListener("mousemove", handleMaterialCardPointerMove, true);
+  document.addEventListener("mouseup", endMaterialCardPointerDrag, true);
   document.addEventListener("focusin", handleMaterialFocus);
   document.addEventListener("click", handleMaterialDocumentClick);
   window.addEventListener("pointermove", handleStepCardPointerMove);
   window.addEventListener("pointerup", endStepCardPointerDrag);
   window.addEventListener("pointercancel", endStepCardPointerDrag);
+  window.addEventListener("mousemove", handleStepCardPointerMove);
+  window.addEventListener("mouseup", endStepCardPointerDrag);
+  window.addEventListener("pointermove", handleMaterialCardPointerMove);
+  window.addEventListener("pointerup", endMaterialCardPointerDrag);
+  window.addEventListener("pointercancel", endMaterialCardPointerDrag);
+  window.addEventListener("mousemove", handleMaterialCardPointerMove);
+  window.addEventListener("mouseup", endMaterialCardPointerDrag);
   window.addEventListener("pointermove", handleGlobalPointerMove);
   window.addEventListener("pointerup", endGlobalDrag);
   window.addEventListener("pointercancel", endGlobalDrag);
@@ -408,6 +507,11 @@
   schedulePreviewScaleUpdate();
   buildImageEditor();
   buildMaterialSearch();
+  initializeExportPanelCollapse();
+  initializeVersionPanelCollapse();
+  initializeBomPanelCollapse();
+  initializeSopHistoryPanelCollapse();
+  initializeFolderTreeExpandedState();
   initializeFeishuPanelCollapse();
   updateDependencyStatus();
   addPage();
@@ -500,7 +604,9 @@
   }
 
   function addPage(options = {}) {
-    const page = buildPage(nextPageId++);
+    const page = buildPage(nextPageId++, {
+      stepTemplateCount: options.stepTemplateCount
+    });
     pagesEl.appendChild(page);
     updatePageNumbers();
     setCurrentPage(page.dataset.pageId);
@@ -510,10 +616,12 @@
     }
   }
 
-  function buildPage(pageId) {
+  function buildPage(pageId, options = {}) {
+    const stepTemplateCount = normalizeStepTemplateCount(options.stepTemplateCount);
     const page = document.createElement("article");
     page.className = "sop-page";
     page.dataset.pageId = String(pageId);
+    page.dataset.stepTemplateCount = String(stepTemplateCount);
     page._globalAnnotationModels = [];
     page._globalTextModels = [];
     const scale = document.createElement("div");
@@ -521,7 +629,7 @@
     const sheet = document.createElement("div");
     sheet.className = "sop-sheet";
 
-    templateCells
+    getTemplateCells(stepTemplateCount)
       .slice()
       .sort((a, b) => (a.row - b.row) || (a.col - b.col))
       .forEach((definition) => {
@@ -535,12 +643,71 @@
     scale.appendChild(sheet);
     page.appendChild(scale);
     setupStepCards(page);
+    setupMaterialCards(page);
     renderGlobalPageOverlays(page);
     return page;
   }
 
+  function normalizeStepTemplateCount(value) {
+    const count = Number(value);
+    return STEP_TEMPLATE_COUNTS.includes(count) ? count : DEFAULT_STEP_TEMPLATE_COUNT;
+  }
+
+  function getPageStepTemplateCount(page) {
+    return normalizeStepTemplateCount(page && page.dataset ? page.dataset.stepTemplateCount : DEFAULT_STEP_TEMPLATE_COUNT);
+  }
+
+  function getPageDataStepTemplateCount(pageData) {
+    return normalizeStepTemplateCount(pageData && pageData.stepTemplateCount);
+  }
+
+  function getTemplateCells(stepTemplateCount = DEFAULT_STEP_TEMPLATE_COUNT) {
+    return templateCells
+      .filter((definition) => !STEP_CARD_CELL_KEYS.has(definition.cellKey))
+      .concat(buildStepTemplateCells(stepTemplateCount));
+  }
+
+  function buildStepTemplateCells(stepTemplateCount = DEFAULT_STEP_TEMPLATE_COUNT) {
+    const cells = [];
+    getStepCardGroupsForCount(stepTemplateCount).forEach((group) => {
+      cells.push(imageCell(group.col, group.imageRow, group.colSpan, 9));
+      cells.push(textCell(group.col, group.descRow, group.colSpan, 2, "", "blank-cell left"));
+      cells.push(textCell(group.col, group.noteRow, group.colSpan, 1, "  特殊标注：", "note-cell special-note-card left", {
+        fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
+      }));
+    });
+    return cells;
+  }
+
+  function getStepCardGroups(page) {
+    return getStepCardGroupsForCount(getPageStepTemplateCount(page));
+  }
+
+  function getStepCardGroupsForCount(stepTemplateCount = DEFAULT_STEP_TEMPLATE_COUNT) {
+    const count = normalizeStepTemplateCount(stepTemplateCount);
+    const layout = STEP_TEMPLATE_LAYOUTS[count] || STEP_TEMPLATE_LAYOUTS[DEFAULT_STEP_TEMPLATE_COUNT];
+    const groups = [];
+
+    layout.rows.forEach((row) => {
+      layout.columns.forEach((column) => {
+        if (groups.length >= count) return;
+        groups.push({
+          imageKey: `c${column.col}r${row.imageRow}`,
+          descKey: `c${column.col}r${row.descRow}`,
+          noteKey: `c${column.col}r${row.noteRow}`,
+          col: column.col,
+          colSpan: column.span,
+          imageRow: row.imageRow,
+          descRow: row.descRow,
+          noteRow: row.noteRow
+        });
+      });
+    });
+    return groups;
+  }
+
   function setupStepCards(page) {
-    STEP_CARD_GROUPS.forEach((group, index) => {
+    getStepCardGroups(page).forEach((group, index) => {
       const elements = getStepCardElements(page, index);
       [
         { element: elements.image, role: "image" },
@@ -566,7 +733,7 @@
   }
 
   function getStepCardElements(page, index) {
-    const group = STEP_CARD_GROUPS[index];
+    const group = getStepCardGroups(page)[index];
     if (!page || !group) {
       return { image: null, desc: null, note: null };
     }
@@ -592,15 +759,22 @@
     handle.setAttribute("aria-label", "拖动步骤卡片排序");
     handle.innerHTML = `
       <svg class="step-card-drag-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4"></path>
+        <path d="M12 3v6M12 15v6M3 12h6M15 12h6M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"></path>
       </svg>
     `;
     handle.addEventListener("pointerdown", (event) => {
       startStepCardPointerDrag(event, page, index);
     });
+    handle.addEventListener("mousedown", (event) => {
+      startStepCardPointerDrag(event, page, index);
+    });
     handle.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (handle.dataset.suppressClick === "true") {
+        handle.dataset.suppressClick = "false";
+        return;
+      }
       selectStepCard(page, index);
     });
     imageSlot.appendChild(handle);
@@ -612,7 +786,8 @@
   }
 
   function selectStepCard(page, index) {
-    if (!page || !STEP_CARD_GROUPS[index]) return;
+    if (!page || !getStepCardGroups(page)[index]) return;
+    clearMaterialCardSelection();
     selectedStepCard = {
       pageId: page.dataset.pageId,
       index
@@ -661,6 +836,7 @@
 
   function startStepCardPointerDrag(event, page, index) {
     if (event.button !== 0) return;
+    if (stepCardPointerDrag) return;
     event.preventDefault();
     event.stopPropagation();
     selectStepCard(page, index);
@@ -674,9 +850,10 @@
       targetIndex: index,
       startX: event.clientX,
       startY: event.clientY,
-      dragging: false
+      dragging: false,
+      handle: event.currentTarget
     };
-    if (event.currentTarget.setPointerCapture) {
+    if (event.currentTarget.setPointerCapture && Number.isInteger(event.pointerId)) {
       event.currentTarget.setPointerCapture(event.pointerId);
     }
   }
@@ -690,6 +867,9 @@
 
     event.preventDefault();
     drag.dragging = true;
+    if (drag.handle) {
+      drag.handle.dataset.suppressClick = "true";
+    }
     const page = getPageById(drag.pageId);
     if (!page) {
       clearStepCardDragState();
@@ -731,6 +911,11 @@
 
     try {
       await moveStepCardWithinPage(sourcePage, drag.index, targetIndex);
+      window.setTimeout(() => {
+        if (document.contains(sourcePage)) {
+          selectStepCard(sourcePage, targetIndex);
+        }
+      }, 120);
     } catch (error) {
       showFileError("步骤卡片排序失败", error);
     }
@@ -813,12 +998,13 @@
 
   async function moveStepCardWithinPage(page, sourceIndex, targetIndex) {
     if (!page || sourceIndex === targetIndex) return;
-    if (!STEP_CARD_GROUPS[sourceIndex] || !STEP_CARD_GROUPS[targetIndex]) return;
+    const groups = getStepCardGroups(page);
+    if (!groups[sourceIndex] || !groups[targetIndex]) return;
     if (editor.isOpen && editor.slot && page.contains(editor.slot)) {
       closeImageEditor();
     }
 
-    const cards = STEP_CARD_GROUPS.map((_, index) => captureStepCardData(page, index));
+    const cards = groups.map((_, index) => captureStepCardData(page, index));
     const [moved] = cards.splice(sourceIndex, 1);
     cards.splice(targetIndex, 0, moved);
     await applyStepCardSequence(page, cards);
@@ -828,7 +1014,8 @@
   }
 
   async function applyStepCardSequence(page, cards) {
-    for (let index = 0; index < STEP_CARD_GROUPS.length; index += 1) {
+    const groups = getStepCardGroups(page);
+    for (let index = 0; index < groups.length; index += 1) {
       await applyStepCardData(page, index, cards[index]);
     }
   }
@@ -888,7 +1075,7 @@
   function getSelectedStepCard() {
     if (!selectedStepCard) return null;
     const page = getPageById(selectedStepCard.pageId);
-    if (!page || !STEP_CARD_GROUPS[selectedStepCard.index]) {
+    if (!page || !getStepCardGroups(page)[selectedStepCard.index]) {
       clearStepCardSelection();
       return null;
     }
@@ -899,6 +1086,405 @@
   }
 
   function cloneStepCardData(data, options = {}) {
+    const clone = structuredCloneSafe(data || {});
+    if (options.regenerateIds && clone.imageSlot) {
+      ["annotations", "texts"].forEach((key) => {
+        if (!Array.isArray(clone.imageSlot[key])) return;
+        clone.imageSlot[key].forEach((model) => {
+          model.id = newOverlayId();
+        });
+      });
+    }
+    return clone;
+  }
+
+  function setupMaterialCards(page) {
+    MATERIAL_CARD_GROUPS.forEach((group, index) => {
+      const elements = getMaterialCardElements(page, index);
+      [
+        { element: elements.image, role: "image" },
+        { element: elements.name, role: "name" },
+        { element: elements.number, role: "number" },
+        { element: elements.spec, role: "spec" }
+      ].forEach(({ element, role }) => {
+        if (!element) return;
+        element.classList.add("material-card-cell", `material-card-${role}`);
+        element.dataset.materialCardIndex = String(index);
+        element.dataset.materialCardRole = role;
+        element.addEventListener("pointerdown", (event) => {
+          if (shouldIgnoreMaterialCardPointer(event)) return;
+          selectMaterialCard(page, index);
+        });
+        element.addEventListener("dragover", (event) => handleMaterialCardDragOver(event, page, index));
+        element.addEventListener("dragleave", () => setMaterialCardDragOver(page, index, false));
+        element.addEventListener("drop", (event) => handleMaterialCardDrop(event, page, index));
+      });
+      if (elements.image) {
+        addMaterialCardDragHandle(elements.image, page, index);
+      }
+    });
+  }
+
+  function getMaterialCardElements(page, index) {
+    const group = MATERIAL_CARD_GROUPS[index];
+    if (!page || !group) {
+      return { image: null, name: null, number: null, spec: null };
+    }
+    return {
+      image: getPageCellByKey(page, group.imageKey),
+      name: getPageCellByKey(page, group.nameKey),
+      number: getPageCellByKey(page, group.numberKey),
+      spec: getPageCellByKey(page, group.specKey)
+    };
+  }
+
+  function addMaterialCardDragHandle(imageSlot, page, index) {
+    if (imageSlot.querySelector(".material-card-drag-handle")) return;
+
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "material-card-drag-handle";
+    handle.draggable = true;
+    handle.setAttribute("draggable", "true");
+    handle.title = "拖动物料排序";
+    handle.setAttribute("aria-label", "拖动物料卡片排序");
+    handle.innerHTML = `
+      <svg class="card-drag-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3v6M12 15v6M3 12h6M15 12h6M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"></path>
+      </svg>
+    `;
+    handle.addEventListener("pointerdown", (event) => {
+      startMaterialCardPointerDrag(event, page, index);
+    });
+    handle.addEventListener("mousedown", (event) => {
+      startMaterialCardPointerDrag(event, page, index);
+    });
+    handle.addEventListener("dragstart", (event) => handleMaterialCardDragStart(event, page, index));
+    handle.addEventListener("dragend", clearMaterialCardDragState);
+    handle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (handle.dataset.suppressClick === "true") {
+        handle.dataset.suppressClick = "false";
+        return;
+      }
+      selectMaterialCard(page, index);
+    });
+    imageSlot.appendChild(handle);
+  }
+
+  function shouldIgnoreMaterialCardPointer(event) {
+    if (event.button !== 0) return true;
+    return Boolean(event.target.closest("button, input, select, textarea, .slot-tools, .material-card-drag-handle"));
+  }
+
+  function selectMaterialCard(page, index) {
+    if (!page || !MATERIAL_CARD_GROUPS[index]) return;
+    clearStepCardSelection();
+    selectedMaterialCard = {
+      pageId: page.dataset.pageId,
+      index
+    };
+    renderMaterialCardSelection();
+  }
+
+  function clearMaterialCardSelection() {
+    selectedMaterialCard = null;
+    renderMaterialCardSelection();
+  }
+
+  function renderMaterialCardSelection() {
+    document.querySelectorAll(".material-card-cell").forEach((cell) => {
+      cell.classList.remove("is-material-card-selected");
+    });
+    if (!selectedMaterialCard) return;
+    const page = getPageById(selectedMaterialCard.pageId);
+    if (!page) return;
+    setMaterialCardSelected(page, selectedMaterialCard.index, true);
+  }
+
+  function setMaterialCardSelected(page, index, selected) {
+    Object.values(getMaterialCardElements(page, index)).forEach((element) => {
+      if (element) {
+        element.classList.toggle("is-material-card-selected", selected);
+      }
+    });
+  }
+
+  function setMaterialCardDragOver(page, index, active) {
+    Object.values(getMaterialCardElements(page, index)).forEach((element) => {
+      if (element) {
+        element.classList.toggle("is-material-card-drag-over", active);
+      }
+    });
+  }
+
+  function clearMaterialCardDragState() {
+    draggedMaterialCard = null;
+    materialCardPointerDrag = null;
+    document.querySelectorAll(".material-card-cell").forEach((cell) => {
+      cell.classList.remove("is-material-card-dragging", "is-material-card-drag-over");
+    });
+  }
+
+  function startMaterialCardPointerDrag(event, page, index) {
+    if (event.button !== 0) return;
+    if (materialCardPointerDrag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectMaterialCard(page, index);
+    draggedMaterialCard = {
+      pageId: page.dataset.pageId,
+      index
+    };
+    materialCardPointerDrag = {
+      pageId: page.dataset.pageId,
+      index,
+      targetIndex: index,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+      handle: event.currentTarget
+    };
+    if (event.currentTarget.setPointerCapture && Number.isInteger(event.pointerId)) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  }
+
+  function handleMaterialCardPointerMove(event) {
+    const drag = materialCardPointerDrag;
+    if (!drag) return;
+
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (!drag.dragging && distance < 5) return;
+
+    event.preventDefault();
+    drag.dragging = true;
+    if (drag.handle) {
+      drag.handle.dataset.suppressClick = "true";
+    }
+    const page = getPageById(drag.pageId);
+    if (!page) {
+      clearMaterialCardDragState();
+      return;
+    }
+
+    Object.values(getMaterialCardElements(page, drag.index)).forEach((element) => {
+      if (element) {
+        element.classList.add("is-material-card-dragging");
+      }
+    });
+    document.querySelectorAll(".material-card-cell.is-material-card-drag-over").forEach((cell) => {
+      cell.classList.remove("is-material-card-drag-over");
+    });
+
+    const target = getMaterialCardTargetFromPoint(event.clientX, event.clientY);
+    if (!target || target.page.dataset.pageId !== drag.pageId || target.index === drag.index) {
+      drag.targetIndex = drag.index;
+      return;
+    }
+    drag.targetIndex = target.index;
+    setMaterialCardDragOver(target.page, target.index, true);
+  }
+
+  async function endMaterialCardPointerDrag(event) {
+    const drag = materialCardPointerDrag;
+    if (!drag) return;
+
+    const target = getMaterialCardTargetFromPoint(event.clientX, event.clientY);
+    const sourcePage = getPageById(drag.pageId);
+    const targetIndex = target && target.page.dataset.pageId === drag.pageId ? target.index : drag.targetIndex;
+    const shouldMove = drag.dragging &&
+      sourcePage &&
+      Number.isInteger(targetIndex) &&
+      targetIndex !== drag.index;
+
+    clearMaterialCardDragState();
+    if (!shouldMove) return;
+
+    try {
+      await moveMaterialCardWithinPage(sourcePage, drag.index, targetIndex);
+      window.setTimeout(() => {
+        if (document.contains(sourcePage)) {
+          selectMaterialCard(sourcePage, targetIndex);
+        }
+      }, 120);
+    } catch (error) {
+      showFileError("物料卡片排序失败", error);
+    }
+  }
+
+  function getMaterialCardTargetFromPoint(x, y) {
+    const element = document.elementFromPoint(x, y);
+    const cell = element && element.closest ? element.closest(".material-card-cell") : null;
+    if (!cell) return null;
+    const page = cell.closest(".sop-page");
+    const index = Number(cell.dataset.materialCardIndex);
+    if (!page || !Number.isInteger(index)) return null;
+    return { page, index };
+  }
+
+  function handleMaterialCardDragOver(event, page, index) {
+    if (!isMaterialCardDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!draggedMaterialCard || draggedMaterialCard.pageId !== page.dataset.pageId) {
+      event.dataTransfer.dropEffect = "none";
+      return;
+    }
+    event.dataTransfer.dropEffect = draggedMaterialCard.index === index ? "none" : "move";
+    if (draggedMaterialCard.index !== index) {
+      setMaterialCardDragOver(page, index, true);
+    }
+  }
+
+  function handleMaterialCardDragStart(event, page, index) {
+    event.stopPropagation();
+    event.currentTarget.dataset.suppressClick = "true";
+    selectMaterialCard(page, index);
+    draggedMaterialCard = {
+      pageId: page.dataset.pageId,
+      index
+    };
+    Object.values(getMaterialCardElements(page, index)).forEach((element) => {
+      if (element) {
+        element.classList.add("is-material-card-dragging");
+      }
+    });
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(MATERIAL_CARD_DRAG_MIME, JSON.stringify(draggedMaterialCard));
+    event.dataTransfer.setData("text/plain", `material-card:${page.dataset.pageId}:${index}`);
+  }
+
+  async function handleMaterialCardDrop(event, page, index) {
+    if (!isMaterialCardDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const source = getMaterialCardDragSource(event);
+    clearMaterialCardDragState();
+    if (!source || source.pageId !== page.dataset.pageId || source.index === index) return;
+    await moveMaterialCardWithinPage(page, source.index, index);
+  }
+
+  function isMaterialCardDragEvent(event) {
+    const dataTransfer = event.dataTransfer;
+    if (!dataTransfer) return false;
+    const types = Array.from(dataTransfer.types || []).map((type) => String(type).toLowerCase());
+    return Boolean(draggedMaterialCard) || types.includes(MATERIAL_CARD_DRAG_MIME);
+  }
+
+  function getMaterialCardDragSource(event) {
+    if (draggedMaterialCard) return draggedMaterialCard;
+    const raw = event.dataTransfer && event.dataTransfer.getData(MATERIAL_CARD_DRAG_MIME);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return {
+        pageId: parsed.pageId,
+        index: Number(parsed.index)
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async function moveMaterialCardWithinPage(page, sourceIndex, targetIndex) {
+    if (!page || sourceIndex === targetIndex) return;
+    if (!MATERIAL_CARD_GROUPS[sourceIndex] || !MATERIAL_CARD_GROUPS[targetIndex]) return;
+    if (editor.isOpen && editor.slot && page.contains(editor.slot)) {
+      closeImageEditor();
+    }
+
+    const cards = MATERIAL_CARD_GROUPS.map((_, index) => captureMaterialCardData(page, index));
+    const [moved] = cards.splice(sourceIndex, 1);
+    cards.splice(targetIndex, 0, moved);
+    await applyMaterialCardSequence(page, cards);
+    activeImageSlot = null;
+    activeMaterialSearchCell = null;
+    selectMaterialCard(page, targetIndex);
+    markDirty();
+  }
+
+  async function applyMaterialCardSequence(page, cards) {
+    for (let index = 0; index < MATERIAL_CARD_GROUPS.length; index += 1) {
+      await applyMaterialCardData(page, index, cards[index]);
+    }
+  }
+
+  function captureMaterialCardData(page, index) {
+    const elements = getMaterialCardElements(page, index);
+    return {
+      imageSlot: elements.image ? serializeImageSlot(elements.image) : null,
+      nameCell: elements.name ? serializeTextCell(elements.name) : null,
+      numberCell: elements.number ? serializeTextCell(elements.number) : null,
+      specCell: elements.spec ? serializeTextCell(elements.spec) : null
+    };
+  }
+
+  async function applyMaterialCardData(page, index, data) {
+    const elements = getMaterialCardElements(page, index);
+    if (!data || !elements.image || !elements.name || !elements.number || !elements.spec) return;
+
+    await applyImageSlotData(elements.image, {
+      ...(data.imageSlot || {}),
+      key: elements.image.dataset.cellKey || "",
+      fit: elements.image.dataset.fit || "contain",
+      logo: false
+    });
+    applySavedTextCell(elements.name, {
+      ...(data.nameCell || {}),
+      key: elements.name.dataset.cellKey || ""
+    });
+    applySavedTextCell(elements.number, {
+      ...(data.numberCell || {}),
+      key: elements.number.dataset.cellKey || ""
+    });
+    applySavedTextCell(elements.spec, {
+      ...(data.specCell || {}),
+      key: elements.spec.dataset.cellKey || ""
+    });
+  }
+
+  function copySelectedMaterialCard() {
+    const selected = getSelectedMaterialCard();
+    if (!selected) return false;
+    materialCardClipboard = cloneMaterialCardData(captureMaterialCardData(selected.page, selected.index), {
+      regenerateIds: true
+    });
+    return true;
+  }
+
+  async function pasteMaterialCardToSelection() {
+    const selected = getSelectedMaterialCard();
+    if (!selected || !materialCardClipboard) return false;
+    if (editor.isOpen && editor.slot && selected.page.contains(editor.slot)) {
+      closeImageEditor();
+    }
+    await applyMaterialCardData(selected.page, selected.index, cloneMaterialCardData(materialCardClipboard, {
+      regenerateIds: true
+    }));
+    activeMaterialSearchCell = null;
+    selectMaterialCard(selected.page, selected.index);
+    markDirty();
+    return true;
+  }
+
+  function getSelectedMaterialCard() {
+    if (!selectedMaterialCard) return null;
+    const page = getPageById(selectedMaterialCard.pageId);
+    if (!page || !MATERIAL_CARD_GROUPS[selectedMaterialCard.index]) {
+      clearMaterialCardSelection();
+      return null;
+    }
+    return {
+      page,
+      index: selectedMaterialCard.index
+    };
+  }
+
+  function cloneMaterialCardData(data, options = {}) {
     const clone = structuredCloneSafe(data || {});
     if (options.regenerateIds && clone.imageSlot) {
       ["annotations", "texts"].forEach((key) => {
@@ -3860,12 +4446,25 @@
         event.preventDefault();
         return;
       }
+      if (key === "c" && copySelectedMaterialCard()) {
+        event.preventDefault();
+        return;
+      }
       if (key === "v" && stepCardClipboard && getSelectedStepCard()) {
         event.preventDefault();
         try {
           await pasteStepCardToSelection();
         } catch (error) {
           showFileError("粘贴步骤卡片失败", error);
+        }
+        return;
+      }
+      if (key === "v" && materialCardClipboard && getSelectedMaterialCard()) {
+        event.preventDefault();
+        try {
+          await pasteMaterialCardToSelection();
+        } catch (error) {
+          showFileError("粘贴物料卡片失败", error);
         }
         return;
       }
@@ -4167,6 +4766,7 @@
     return getPages().map((page) => {
       return {
         pageNumber: Number(page.dataset.pageNumber) || 0,
+        stepTemplateCount: getPageStepTemplateCount(page),
         textCells: getEditableTextCells(page).map(serializeTextCell),
         imageSlots: Array.from(page.querySelectorAll(".image-cell")).map(serializeImageSlot),
         globalAnnotations: (page._globalAnnotationModels || []).map(cloneModel),
@@ -4246,7 +4846,9 @@
 
       const safePages = Array.isArray(pagesData) && pagesData.length ? pagesData : [{}];
       for (const pageData of safePages) {
-        const page = buildPage(nextPageId++);
+        const page = buildPage(nextPageId++, {
+          stepTemplateCount: getPageDataStepTemplateCount(pageData)
+        });
         pagesEl.appendChild(page);
         await applyPageData(page, pageData);
       }
@@ -4356,24 +4958,67 @@
   }
 
   function waitImageReady(img) {
+    if (!img) {
+      return Promise.reject(new Error("图片元素不存在"));
+    }
     if (img.complete && img.naturalWidth) {
       return Promise.resolve();
     }
     return new Promise((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error("图片加载超时")), 5000);
-      img.addEventListener("load", () => {
-        window.clearTimeout(timer);
+      let finished = false;
+      let poll = 0;
+      let timeout = 0;
+      const cleanup = () => {
+        img.removeEventListener("load", checkReady);
+        img.removeEventListener("error", handleError);
+        window.clearTimeout(timeout);
+        window.clearInterval(poll);
+      };
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        cleanup();
         resolve();
-      }, { once: true });
-      img.addEventListener("error", () => {
-        window.clearTimeout(timer);
-        reject(new Error("图片数据无法加载"));
-      }, { once: true });
+      };
+      const fail = (error) => {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        reject(error);
+      };
+      const checkReady = () => {
+        if (img.complete && img.naturalWidth) {
+          finish();
+        }
+      };
+      const handleError = () => {
+        fail(new Error("图片数据无法加载"));
+      };
+      timeout = window.setTimeout(() => {
+        checkReady();
+        if (!finished) {
+          fail(new Error("图片加载超时"));
+        }
+      }, 5000);
+      poll = window.setInterval(checkReady, 50);
+      img.addEventListener("load", checkReady);
+      img.addEventListener("error", handleError);
+      checkReady();
     });
   }
 
   function nextFrame() {
-    return new Promise((resolve) => window.requestAnimationFrame(resolve));
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve();
+      };
+      const timer = window.setTimeout(finish, 80);
+      window.requestAnimationFrame(finish);
+    });
   }
 
   function markDirty() {
@@ -4464,6 +5109,7 @@
     nextPageId = 1;
     currentPageId = null;
     activeImageSlot = null;
+    activeMaterialSearchCell = null;
     globalEditor.selected = null;
     globalEditor.drag = null;
     draggedPageId = null;
@@ -4471,6 +5117,10 @@
     stepCardPointerDrag = null;
     selectedStepCard = null;
     stepCardClipboard = null;
+    draggedMaterialCard = null;
+    materialCardPointerDrag = null;
+    selectedMaterialCard = null;
+    materialCardClipboard = null;
     nextAnnotationLayerId = 1;
     nextOverlayId = 1;
     updateGlobalEditState();
@@ -4651,6 +5301,7 @@
       {
         id: DEFAULT_FOLDER_ID,
         name: libraryState.rootName || "根目录",
+        parentId: "",
         path: "",
         handle: libraryState.rootHandle,
         system: true
@@ -4688,6 +5339,7 @@
         const childFolder = {
           id: childPath,
           name,
+          parentId: folderId,
           path: childPath,
           handle,
           system: false
@@ -4781,6 +5433,8 @@
       return;
     }
 
+    ensureActiveFolderTreeVisible();
+
     const allButton = buildFolderButton({
       id: ALL_FOLDER_ID,
       name: "全部",
@@ -4788,15 +5442,105 @@
     });
     libraryFolderListEl.appendChild(allButton);
 
-    libraryState.folders.forEach((folder) => {
-      const count = libraryState.documents.filter((documentItem) => {
-        return (documentItem.folderId || DEFAULT_FOLDER_ID) === folder.id;
-      }).length;
-      libraryFolderListEl.appendChild(buildFolderButton({ ...folder, count }));
-    });
+    const tree = buildLibraryFolderTree();
+    const rootNode = tree.byId.get(DEFAULT_FOLDER_ID);
+    if (rootNode) {
+      libraryFolderListEl.appendChild(renderFolderTreeNode(rootNode, 0, tree));
+    }
   }
 
-  function buildFolderButton(folder) {
+  function buildLibraryFolderTree() {
+    const byId = new Map();
+    const folders = libraryState.folders.length ? libraryState.folders : [{
+      id: DEFAULT_FOLDER_ID,
+      name: libraryState.rootName || "根目录",
+      parentId: "",
+      path: "",
+      handle: libraryState.rootHandle,
+      system: true
+    }];
+
+    folders.forEach((folder) => {
+      byId.set(folder.id, {
+        ...folder,
+        parentId: folder.parentId || "",
+        children: []
+      });
+    });
+
+    if (!byId.has(DEFAULT_FOLDER_ID)) {
+      byId.set(DEFAULT_FOLDER_ID, {
+        id: DEFAULT_FOLDER_ID,
+        name: libraryState.rootName || "根目录",
+        parentId: "",
+        path: "",
+        handle: libraryState.rootHandle,
+        system: true,
+        children: []
+      });
+    }
+
+    const pathToId = new Map();
+    byId.forEach((node) => {
+      if (node.path) {
+        pathToId.set(String(node.path), node.id);
+      }
+    });
+    byId.forEach((node) => {
+      let parentId = getFolderParentId(node);
+      const path = String(node.path || "");
+      if ((!node.parentId || node.parentId === DEFAULT_FOLDER_ID) && path.includes("/")) {
+        const parentPath = path.split("/").slice(0, -1).join("/");
+        if (pathToId.has(parentPath)) {
+          parentId = pathToId.get(parentPath);
+        }
+      }
+      node.parentId = parentId;
+    });
+
+    byId.forEach((node) => {
+      if (node.id === DEFAULT_FOLDER_ID) return;
+      const parentId = byId.has(node.parentId) && node.parentId !== node.id ? node.parentId : DEFAULT_FOLDER_ID;
+      const parent = byId.get(parentId);
+      if (parent) {
+        parent.children.push(node);
+      }
+    });
+
+    byId.forEach((node) => {
+      node.children.sort((a, b) => String(a.path || a.name).localeCompare(String(b.path || b.name), "zh-Hans-CN"));
+    });
+
+    return { byId };
+  }
+
+  function renderFolderTreeNode(folder, level, tree) {
+    const fragment = document.createDocumentFragment();
+    const hasChildren = Boolean(folder.children && folder.children.length);
+    const expanded = !hasChildren || libraryState.expandedFolderIds.has(folder.id);
+    const count = getFolderDocumentCount(folder.id, tree);
+    fragment.appendChild(buildFolderButton({ ...folder, count }, {
+      tree: true,
+      level,
+      hasChildren,
+      expanded
+    }));
+
+    if (libraryState.activeFolderId === folder.id) {
+      getDirectFolderDocuments(folder.id).forEach((documentItem) => {
+        fragment.appendChild(buildFolderDocumentTreeItem(documentItem, level + 1));
+      });
+    }
+
+    if (hasChildren && expanded) {
+      folder.children.forEach((child) => {
+        fragment.appendChild(renderFolderTreeNode(child, level + 1, tree));
+      });
+    }
+    return fragment;
+  }
+
+  function buildFolderButton(folder, options = {}) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "folder-button";
@@ -4813,7 +5557,181 @@
       libraryState.activeFolderId = folder.id;
       renderLibrary();
     });
-    return button;
+
+    if (!options.tree) {
+      return button;
+    }
+
+    const row = document.createElement("div");
+    row.className = "folder-tree-row";
+    row.style.setProperty("--folder-depth", String(Math.max(0, options.level || 0)));
+
+    if (options.hasChildren) {
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "folder-tree-toggle";
+      toggle.classList.toggle("is-expanded", Boolean(options.expanded));
+      toggle.setAttribute("aria-label", options.expanded ? "收起文件夹" : "展开文件夹");
+      toggle.setAttribute("aria-expanded", String(Boolean(options.expanded)));
+      toggle.innerHTML = `<span aria-hidden="true">&gt;</span>`;
+      toggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        setFolderTreeExpanded(folder.id, !options.expanded, { persist: true });
+        renderLibrary();
+      });
+      row.appendChild(toggle);
+    } else {
+      const spacer = document.createElement("span");
+      spacer.className = "folder-tree-toggle-spacer";
+      row.appendChild(spacer);
+    }
+
+    row.appendChild(button);
+    return row;
+  }
+
+  function getDirectFolderDocuments(folderId) {
+    return libraryState.documents.filter((documentItem) => {
+      return (documentItem.folderId || DEFAULT_FOLDER_ID) === folderId;
+    });
+  }
+
+  function buildFolderDocumentTreeItem(documentItem, level) {
+    const row = document.createElement("div");
+    row.className = "folder-file-row";
+    row.dataset.fileId = documentItem.id;
+    row.dataset.documentId = documentItem.documentId || "";
+    row.style.setProperty("--folder-depth", String(Math.max(0, level || 0)));
+    const isActive = Boolean(
+      (documentItem.id && documentItem.id === projectState.libraryFileId) ||
+      (!projectState.libraryFileId && documentItem.documentId && documentItem.documentId === projectState.documentId)
+    );
+    row.classList.toggle("active", isActive);
+
+    const spacer = document.createElement("span");
+    spacer.className = "folder-tree-toggle-spacer";
+
+    const card = document.createElement("div");
+    card.className = "folder-file-card";
+
+    const main = document.createElement("button");
+    main.type = "button";
+    main.className = "folder-file-main";
+    main.addEventListener("click", () => switchLibraryDocument(documentItem.id));
+
+    const title = document.createElement("strong");
+    title.textContent = removeProjectExtension(documentItem.name || "未命名");
+    const meta = document.createElement("span");
+    meta.textContent = `V${documentItem.currentVersion || 1} · ${formatDateTime(documentItem.updatedAt)}`;
+    main.append(title, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "folder-file-actions";
+    const renameButton = buildLibrarySmallButton("rename", "重命名");
+    const deleteButton = buildLibrarySmallButton("delete", "删除");
+    renameButton.addEventListener("click", () => renameLibraryDocument(documentItem.id));
+    deleteButton.addEventListener("click", () => deleteLibraryDocument(documentItem.id));
+    actions.append(renameButton, deleteButton);
+
+    card.append(main, actions);
+    row.append(spacer, card);
+    return row;
+  }
+
+  function getFolderParentId(folder) {
+    if (!folder || folder.id === DEFAULT_FOLDER_ID) return "";
+    if (folder.parentId && folder.parentId !== folder.id) return folder.parentId;
+
+    const path = String(folder.path || folder.id || "");
+    if (path.includes("/")) {
+      const parentPath = path.split("/").slice(0, -1).join("/");
+      return parentPath || DEFAULT_FOLDER_ID;
+    }
+    return DEFAULT_FOLDER_ID;
+  }
+
+  function getFolderDescendantIds(folderId, tree = buildLibraryFolderTree()) {
+    const ids = new Set();
+    const start = tree.byId.get(folderId);
+    if (!start) {
+      ids.add(folderId || DEFAULT_FOLDER_ID);
+      return ids;
+    }
+
+    const walk = (node) => {
+      ids.add(node.id);
+      (node.children || []).forEach(walk);
+    };
+    walk(start);
+    return ids;
+  }
+
+  function getFolderDocumentCount(folderId, tree = buildLibraryFolderTree()) {
+    const folderIds = getFolderDescendantIds(folderId, tree);
+    return libraryState.documents.filter((documentItem) => {
+      return folderIds.has(documentItem.folderId || DEFAULT_FOLDER_ID);
+    }).length;
+  }
+
+  function getActiveFolderScopeIds() {
+    if (libraryState.activeFolderId === ALL_FOLDER_ID) return null;
+    return getFolderDescendantIds(libraryState.activeFolderId);
+  }
+
+  function itemMatchesActiveFolder(item) {
+    if (libraryState.activeFolderId === ALL_FOLDER_ID) return true;
+    const scope = getActiveFolderScopeIds();
+    return scope ? scope.has(item.folderId || DEFAULT_FOLDER_ID) : false;
+  }
+
+  function initializeFolderTreeExpandedState() {
+    let ids = [DEFAULT_FOLDER_ID];
+    try {
+      const raw = window.localStorage.getItem(FOLDER_TREE_EXPANDED_KEY);
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed)) {
+        ids = parsed.filter((id) => typeof id === "string" && id);
+      }
+    } catch (_) {
+      ids = [DEFAULT_FOLDER_ID];
+    }
+    if (!ids.includes(DEFAULT_FOLDER_ID)) {
+      ids.push(DEFAULT_FOLDER_ID);
+    }
+    libraryState.expandedFolderIds = new Set(ids);
+  }
+
+  function setFolderTreeExpanded(folderId, expanded, options = {}) {
+    if (!folderId || folderId === ALL_FOLDER_ID) return;
+    if (expanded) {
+      libraryState.expandedFolderIds.add(folderId);
+    } else {
+      libraryState.expandedFolderIds.delete(folderId);
+    }
+
+    if (options.persist) {
+      persistFolderTreeExpandedState();
+    }
+  }
+
+  function persistFolderTreeExpandedState() {
+    try {
+      window.localStorage.setItem(FOLDER_TREE_EXPANDED_KEY, JSON.stringify(Array.from(libraryState.expandedFolderIds)));
+    } catch (_) {
+      // Ignore storage failures; tree state still updates for this session.
+    }
+  }
+
+  function ensureActiveFolderTreeVisible() {
+    if (libraryState.activeFolderId === ALL_FOLDER_ID) return;
+    const tree = buildLibraryFolderTree();
+    let folder = tree.byId.get(libraryState.activeFolderId);
+    while (folder) {
+      const parentId = getFolderParentId(folder);
+      if (!parentId) break;
+      libraryState.expandedFolderIds.add(parentId);
+      folder = tree.byId.get(parentId);
+    }
   }
 
   function renderBomHistory() {
@@ -4852,9 +5770,10 @@
   }
 
   function getVisibleBomItems() {
+    const activeScope = getActiveFolderScopeIds();
     const folderBoms = libraryState.activeFolderId === ALL_FOLDER_ID ?
       libraryState.boms :
-      libraryState.boms.filter((item) => (item.folderId || DEFAULT_FOLDER_ID) === libraryState.activeFolderId);
+      libraryState.boms.filter((item) => activeScope && activeScope.has(item.folderId || DEFAULT_FOLDER_ID));
     const seen = new Set();
     const items = [];
 
@@ -4881,6 +5800,16 @@
       empty.className = "library-empty";
       empty.textContent = "连接电脑文件夹或飞书云盘后，这里会显示其中的 .sop.json 文件。";
       sopLibraryListEl.appendChild(empty);
+      return;
+    }
+
+    if (libraryState.activeFolderId !== ALL_FOLDER_ID) {
+      const notice = document.createElement("div");
+      notice.className = "library-empty";
+      notice.textContent = documents.length ?
+        "当前文件夹的 SOP 文件已显示在上方文件夹树中。" :
+        "当前文件夹暂无 SOP 文件。";
+      sopLibraryListEl.appendChild(notice);
       return;
     }
 
@@ -5152,6 +6081,309 @@
     libraryToggleButton.setAttribute("aria-expanded", String(!libraryState.collapsed));
     libraryToggleButton.setAttribute("aria-label", libraryState.collapsed ? "展开SOP库" : "折叠SOP库");
     schedulePreviewScaleUpdate();
+  }
+
+  function buildAddPageTemplateMenu() {
+    if (!addPageButton || document.getElementById("add-page-template-menu")) return;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "add-page-control";
+    addPageButton.parentNode.insertBefore(wrapper, addPageButton);
+    wrapper.appendChild(addPageButton);
+
+    addPageTemplateMenu = document.createElement("div");
+    addPageTemplateMenu.className = "add-page-template-menu";
+    addPageTemplateMenu.id = "add-page-template-menu";
+    addPageTemplateMenu.setAttribute("role", "menu");
+    addPageTemplateMenu.setAttribute("aria-label", "选择新增页面模板");
+
+    STEP_TEMPLATE_COUNTS.forEach((count) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "add-page-template-option";
+      button.setAttribute("role", "menuitem");
+      button.dataset.stepTemplateCount = String(count);
+      button.textContent = `${count}步骤模板`;
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        addPage({ scrollIntoView: true, stepTemplateCount: count });
+        addPageTemplateMenu.classList.remove("is-open");
+      });
+      addPageTemplateMenu.appendChild(button);
+    });
+
+    wrapper.appendChild(addPageTemplateMenu);
+    wrapper.addEventListener("mouseenter", () => addPageTemplateMenu.classList.add("is-open"));
+    wrapper.addEventListener("mouseleave", () => addPageTemplateMenu.classList.remove("is-open"));
+    wrapper.addEventListener("focusin", () => addPageTemplateMenu.classList.add("is-open"));
+    wrapper.addEventListener("focusout", (event) => {
+      if (!wrapper.contains(event.relatedTarget)) {
+        addPageTemplateMenu.classList.remove("is-open");
+      }
+    });
+  }
+
+  function buildExportCollapsePanel() {
+    const exportButtons = [printButton, batchPrintButton, exportPptxButton, batchExportPptxButton].filter(Boolean);
+    if (!exportButtons.length || document.getElementById("export-panel")) return;
+
+    exportPanel = document.createElement("section");
+    exportPanel.className = "toolbar-collapse-panel is-collapsed";
+    exportPanel.id = "export-panel";
+
+    exportPanelToggle = document.createElement("button");
+    exportPanelToggle.className = "toolbar-collapse-toggle";
+    exportPanelToggle.id = "export-panel-toggle";
+    exportPanelToggle.type = "button";
+    exportPanelToggle.setAttribute("aria-expanded", "false");
+    exportPanelToggle.setAttribute("aria-controls", "export-panel-body");
+    exportPanelToggle.innerHTML = `
+      <span>导出</span>
+      <span class="toolbar-collapse-indicator" aria-hidden="true">&gt;</span>
+    `;
+
+    exportPanelBody = document.createElement("div");
+    exportPanelBody.className = "toolbar-collapse-body";
+    exportPanelBody.id = "export-panel-body";
+    exportPanelBody.hidden = true;
+
+    const anchor = printButton;
+    anchor.parentNode.insertBefore(exportPanel, anchor);
+    exportPanel.append(exportPanelToggle, exportPanelBody);
+    exportButtons.forEach((button) => {
+      exportPanelBody.appendChild(button);
+    });
+  }
+
+  function initializeExportPanelCollapse() {
+    let collapsed = true;
+    try {
+      const stored = window.localStorage.getItem(EXPORT_PANEL_COLLAPSED_KEY);
+      if (stored === "false") {
+        collapsed = false;
+      }
+    } catch (_) {
+      collapsed = true;
+    }
+    setExportPanelCollapsed(collapsed);
+  }
+
+  function setExportPanelCollapsed(collapsed, options = {}) {
+    if (!exportPanel || !exportPanelBody || !exportPanelToggle) return;
+
+    const nextCollapsed = Boolean(collapsed);
+    exportPanel.classList.toggle("is-collapsed", nextCollapsed);
+    exportPanelBody.hidden = nextCollapsed;
+    exportPanelToggle.setAttribute("aria-expanded", String(!nextCollapsed));
+
+    if (options.persist) {
+      try {
+        window.localStorage.setItem(EXPORT_PANEL_COLLAPSED_KEY, String(nextCollapsed));
+      } catch (_) {
+        // Ignore storage failures; the UI state still updates for this session.
+      }
+    }
+  }
+
+  function buildVersionCollapsePanel() {
+    const versionItems = [createVersionButton, versionSelect, fileStatusEl].filter(Boolean);
+    if (!versionItems.length || document.getElementById("version-panel")) return;
+
+    versionPanel = document.createElement("section");
+    versionPanel.className = "library-collapse-panel is-collapsed";
+    versionPanel.id = "version-panel";
+
+    versionPanelToggle = document.createElement("button");
+    versionPanelToggle.className = "library-collapse-toggle";
+    versionPanelToggle.id = "version-panel-toggle";
+    versionPanelToggle.type = "button";
+    versionPanelToggle.setAttribute("aria-expanded", "false");
+    versionPanelToggle.setAttribute("aria-controls", "version-panel-body");
+    versionPanelToggle.innerHTML = `
+      <span>版本</span>
+      <span class="collapse-indicator" aria-hidden="true">&gt;</span>
+    `;
+
+    versionPanelBody = document.createElement("div");
+    versionPanelBody.className = "library-collapse-body";
+    versionPanelBody.id = "version-panel-body";
+    versionPanelBody.hidden = true;
+
+    const anchor = createVersionButton;
+    anchor.parentNode.insertBefore(versionPanel, anchor);
+    versionPanel.append(versionPanelToggle, versionPanelBody);
+    versionItems.forEach((item) => {
+      versionPanelBody.appendChild(item);
+    });
+  }
+
+  function initializeVersionPanelCollapse() {
+    let collapsed = true;
+    try {
+      const stored = window.localStorage.getItem(VERSION_PANEL_COLLAPSED_KEY);
+      if (stored === "false") {
+        collapsed = false;
+      }
+    } catch (_) {
+      collapsed = true;
+    }
+    setVersionPanelCollapsed(collapsed);
+  }
+
+  function setVersionPanelCollapsed(collapsed, options = {}) {
+    if (!versionPanel || !versionPanelBody || !versionPanelToggle) return;
+
+    const nextCollapsed = Boolean(collapsed);
+    versionPanel.classList.toggle("is-collapsed", nextCollapsed);
+    versionPanelBody.hidden = nextCollapsed;
+    versionPanelToggle.setAttribute("aria-expanded", String(!nextCollapsed));
+
+    if (options.persist) {
+      try {
+        window.localStorage.setItem(VERSION_PANEL_COLLAPSED_KEY, String(nextCollapsed));
+      } catch (_) {
+        // Ignore storage failures; the UI state still updates for this session.
+      }
+    }
+  }
+
+  function getLibrarySectionTitleBefore(element) {
+    let node = element ? element.previousElementSibling : null;
+    while (node && !node.classList.contains("library-section-title")) {
+      node = node.previousElementSibling;
+    }
+    return node;
+  }
+
+  function buildBomCollapsePanel() {
+    if (!bomPickFileButton || !bomHistoryListEl || document.getElementById("bom-panel")) return;
+
+    const bomActions = bomPickFileButton.closest(".library-actions");
+    const bomTitle = getLibrarySectionTitleBefore(bomActions);
+    const bomHistoryTitle = getLibrarySectionTitleBefore(bomHistoryListEl);
+    const bomItems = [bomTitle, bomActions, bomFileInput, bomHistoryTitle, bomHistoryListEl].filter(Boolean);
+    if (!bomItems.length) return;
+
+    bomPanel = document.createElement("section");
+    bomPanel.className = "library-collapse-panel is-collapsed";
+    bomPanel.id = "bom-panel";
+
+    bomPanelToggle = document.createElement("button");
+    bomPanelToggle.className = "library-collapse-toggle";
+    bomPanelToggle.id = "bom-panel-toggle";
+    bomPanelToggle.type = "button";
+    bomPanelToggle.setAttribute("aria-expanded", "false");
+    bomPanelToggle.setAttribute("aria-controls", "bom-panel-body");
+    bomPanelToggle.innerHTML = `
+      <span>BOM</span>
+      <span class="collapse-indicator" aria-hidden="true">&gt;</span>
+    `;
+
+    bomPanelBody = document.createElement("div");
+    bomPanelBody.className = "library-collapse-body";
+    bomPanelBody.id = "bom-panel-body";
+    bomPanelBody.hidden = true;
+
+    bomItems[0].parentNode.insertBefore(bomPanel, bomItems[0]);
+    bomPanel.append(bomPanelToggle, bomPanelBody);
+    bomItems.forEach((item) => {
+      bomPanelBody.appendChild(item);
+    });
+  }
+
+  function initializeBomPanelCollapse() {
+    let collapsed = true;
+    try {
+      const stored = window.localStorage.getItem(BOM_PANEL_COLLAPSED_KEY);
+      if (stored === "false") {
+        collapsed = false;
+      }
+    } catch (_) {
+      collapsed = true;
+    }
+    setBomPanelCollapsed(collapsed);
+  }
+
+  function setBomPanelCollapsed(collapsed, options = {}) {
+    if (!bomPanel || !bomPanelBody || !bomPanelToggle) return;
+
+    const nextCollapsed = Boolean(collapsed);
+    bomPanel.classList.toggle("is-collapsed", nextCollapsed);
+    bomPanelBody.hidden = nextCollapsed;
+    bomPanelToggle.setAttribute("aria-expanded", String(!nextCollapsed));
+
+    if (options.persist) {
+      try {
+        window.localStorage.setItem(BOM_PANEL_COLLAPSED_KEY, String(nextCollapsed));
+      } catch (_) {
+        // Ignore storage failures; the UI state still updates for this session.
+      }
+    }
+  }
+
+  function buildSopHistoryCollapsePanel() {
+    if (!sopLibraryListEl || document.getElementById("sop-history-panel")) return;
+
+    const sopHistoryTitle = getLibrarySectionTitleBefore(sopLibraryListEl);
+    const sopHistoryItems = [sopHistoryTitle, sopLibraryListEl].filter(Boolean);
+    if (!sopHistoryItems.length) return;
+
+    sopHistoryPanel = document.createElement("section");
+    sopHistoryPanel.className = "library-collapse-panel is-collapsed";
+    sopHistoryPanel.id = "sop-history-panel";
+
+    sopHistoryPanelToggle = document.createElement("button");
+    sopHistoryPanelToggle.className = "library-collapse-toggle";
+    sopHistoryPanelToggle.id = "sop-history-panel-toggle";
+    sopHistoryPanelToggle.type = "button";
+    sopHistoryPanelToggle.setAttribute("aria-expanded", "false");
+    sopHistoryPanelToggle.setAttribute("aria-controls", "sop-history-panel-body");
+    sopHistoryPanelToggle.innerHTML = `
+      <span>SOP历史</span>
+      <span class="collapse-indicator" aria-hidden="true">&gt;</span>
+    `;
+
+    sopHistoryPanelBody = document.createElement("div");
+    sopHistoryPanelBody.className = "library-collapse-body";
+    sopHistoryPanelBody.id = "sop-history-panel-body";
+    sopHistoryPanelBody.hidden = true;
+
+    sopHistoryItems[0].parentNode.insertBefore(sopHistoryPanel, sopHistoryItems[0]);
+    sopHistoryPanel.append(sopHistoryPanelToggle, sopHistoryPanelBody);
+    sopHistoryItems.forEach((item) => {
+      sopHistoryPanelBody.appendChild(item);
+    });
+  }
+
+  function initializeSopHistoryPanelCollapse() {
+    let collapsed = true;
+    try {
+      const stored = window.localStorage.getItem(SOP_HISTORY_PANEL_COLLAPSED_KEY);
+      if (stored === "false") {
+        collapsed = false;
+      }
+    } catch (_) {
+      collapsed = true;
+    }
+    setSopHistoryPanelCollapsed(collapsed);
+  }
+
+  function setSopHistoryPanelCollapsed(collapsed, options = {}) {
+    if (!sopHistoryPanel || !sopHistoryPanelBody || !sopHistoryPanelToggle) return;
+
+    const nextCollapsed = Boolean(collapsed);
+    sopHistoryPanel.classList.toggle("is-collapsed", nextCollapsed);
+    sopHistoryPanelBody.hidden = nextCollapsed;
+    sopHistoryPanelToggle.setAttribute("aria-expanded", String(!nextCollapsed));
+
+    if (options.persist) {
+      try {
+        window.localStorage.setItem(SOP_HISTORY_PANEL_COLLAPSED_KEY, String(nextCollapsed));
+      } catch (_) {
+        // Ignore storage failures; the UI state still updates for this session.
+      }
+    }
   }
 
   function initializeFeishuPanelCollapse() {
@@ -5612,6 +6844,7 @@
 
   async function runSelfTest() {
     try {
+      document.body.dataset.selftestStep = "start";
       const imageData = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
       const csv = [
         "物料编号,物料名称,规格数量,图片",
@@ -5630,13 +6863,16 @@
 
       libraryState.activeBom = bom;
       openBomPreview(bom);
+      document.body.dataset.selftestStep = "bom-preview";
       const numberCell = document.querySelector(".text-cell[data-material-field='number'][data-material-index='0']");
       applyBomItemToMaterial(numberCell, bom.items[0]);
+      document.body.dataset.selftestStep = "bom-applied";
       const page = numberCell.closest(".sop-page");
       const nameCell = page.querySelector(".text-cell[data-material-field='name'][data-material-index='0']");
       const specCell = page.querySelector(".text-cell[data-material-field='spec'][data-material-index='0']");
       const imageSlot = page.querySelector(".image-cell[data-material-index='0']");
       const img = imageSlot.querySelector("img");
+      document.body.dataset.selftestStep = "bom-image-wait";
       await waitImageReady(img);
       await nextFrame();
 
@@ -5648,6 +6884,7 @@
       const matchedImg = imageSlot.querySelector("img");
       await waitImageReady(matchedImg);
       await nextFrame();
+      document.body.dataset.selftestStep = "bom-match";
 
       const stepPage = getPages()[0];
       const sourceStepImage = getPageCellByKey(stepPage, "c5r2");
@@ -5679,6 +6916,45 @@
         movedStepDesc.textContent === "SELFTEST_STEP_SOURCE" &&
         movedStepNote.textContent === "SELFTEST_NOTE_SOURCE" &&
         movedStepImage.dataset.hasImage === "true";
+      document.body.dataset.selftestStep = "step-card";
+
+      const sourceMaterialImage = getPageCellByKey(stepPage, "c1r15");
+      const sourceMaterialName = getPageCellByKey(stepPage, "c3r15");
+      const sourceMaterialNumber = getPageCellByKey(stepPage, "c3r16");
+      const sourceMaterialSpec = getPageCellByKey(stepPage, "c3r17");
+      setMaterialFieldValue(sourceMaterialName, "name", "SELFTEST_MATERIAL_NAME");
+      setMaterialFieldValue(sourceMaterialNumber, "number", "SELFTEST-MAT-001");
+      setMaterialFieldValue(sourceMaterialSpec, "spec", "SELFTEST_SPEC");
+      loadImageSource(sourceMaterialImage, imageData);
+      await waitImageReady(sourceMaterialImage.querySelector("img"));
+      await nextFrame();
+      document.body.dataset.selftestStep = "material-source";
+
+      selectMaterialCard(stepPage, 4);
+      const materialCopied = copySelectedMaterialCard();
+      selectMaterialCard(stepPage, 5);
+      const materialPasted = await pasteMaterialCardToSelection();
+      const pastedMaterialImage = getPageCellByKey(stepPage, "c1r18");
+      const pastedMaterialName = getPageCellByKey(stepPage, "c3r18");
+      const pastedMaterialNumber = getPageCellByKey(stepPage, "c3r19");
+      const pastedMaterialSpec = getPageCellByKey(stepPage, "c3r20");
+      const pasteMaterialPassed = materialPasted &&
+        getMaterialFieldValue(pastedMaterialName, "name") === "SELFTEST_MATERIAL_NAME" &&
+        getMaterialFieldValue(pastedMaterialNumber, "number") === "SELFTEST-MAT-001" &&
+        getMaterialFieldValue(pastedMaterialSpec, "spec") === "SELFTEST_SPEC" &&
+        pastedMaterialImage.dataset.hasImage === "true";
+      await moveMaterialCardWithinPage(stepPage, 5, 7);
+      const movedMaterialImage = getPageCellByKey(stepPage, "c1r24");
+      const movedMaterialName = getPageCellByKey(stepPage, "c3r24");
+      const movedMaterialNumber = getPageCellByKey(stepPage, "c3r25");
+      const movedMaterialSpec = getPageCellByKey(stepPage, "c3r26");
+      const materialCardPassed = materialCopied &&
+        pasteMaterialPassed &&
+        getMaterialFieldValue(movedMaterialName, "name") === "SELFTEST_MATERIAL_NAME" &&
+        getMaterialFieldValue(movedMaterialNumber, "number") === "SELFTEST-MAT-001" &&
+        getMaterialFieldValue(movedMaterialSpec, "spec") === "SELFTEST_SPEC" &&
+        movedMaterialImage.dataset.hasImage === "true";
+      document.body.dataset.selftestStep = "material-card";
 
       const bomPassed = getMaterialFieldValue(numberCell, "number") === "MAT-001" &&
         getMaterialFieldValue(nameCell, "name") === "测试物料" &&
@@ -5686,10 +6962,10 @@
         imageSlot.dataset.hasImage === "true" &&
         bomPreviewPanel.hidden === false &&
         appShellEl.classList.contains("bom-preview-open");
-      const passed = bomPassed && stepCardPassed;
+      const passed = bomPassed && stepCardPassed && materialCardPassed;
       document.body.dataset.selftest = passed ? "pass" : "fail";
       if (!passed) {
-        document.body.dataset.selftestError = `BOM:${bomPassed} STEP_CARD:${stepCardPassed}`;
+        document.body.dataset.selftestError = `BOM:${bomPassed} STEP_CARD:${stepCardPassed} MATERIAL_CARD:${materialCardPassed}`;
       }
     } catch (error) {
       document.body.dataset.selftest = "fail";
@@ -5868,14 +7144,22 @@
       const matchesDocument = item.dataset.documentId && item.dataset.documentId === projectState.documentId;
       item.classList.toggle("active", Boolean(matchesFile || (!projectState.libraryFileId && matchesDocument)));
     });
+    if (libraryFolderListEl) {
+      libraryFolderListEl.querySelectorAll(".folder-file-row").forEach((item) => {
+        const matchesFile = item.dataset.fileId && item.dataset.fileId === projectState.libraryFileId;
+        const matchesDocument = item.dataset.documentId && item.dataset.documentId === projectState.documentId;
+        item.classList.toggle("active", Boolean(matchesFile || (!projectState.libraryFileId && matchesDocument)));
+      });
+    }
   }
 
   function getVisibleLibraryDocuments() {
     if (libraryState.activeFolderId === ALL_FOLDER_ID) {
       return libraryState.documents;
     }
+    const activeScope = getActiveFolderScopeIds();
     return libraryState.documents.filter((documentItem) => {
-      return (documentItem.folderId || DEFAULT_FOLDER_ID) === libraryState.activeFolderId;
+      return activeScope && activeScope.has(documentItem.folderId || DEFAULT_FOLDER_ID);
     });
   }
 
@@ -6321,6 +7605,7 @@
         id: DEFAULT_FOLDER_ID,
         cloudId: payload.rootId || libraryState.feishu.folderToken,
         name: rootName,
+        parentId: "",
         path: "",
         source: STORAGE_MODE_FEISHU,
         system: true
@@ -6631,7 +7916,9 @@
     let editableIndex = 0;
     let imageIndex = 0;
 
-    const definitions = templateCells.slice().sort((a, b) => (a.row - b.row) || (a.col - b.col));
+    const definitions = getTemplateCells(getPageDataStepTemplateCount(pageData))
+      .slice()
+      .sort((a, b) => (a.row - b.row) || (a.col - b.col));
     definitions.forEach((definition) => {
       const box = getPptCellBox(definition);
       if (definition.kind === "image") {
