@@ -60,7 +60,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.6.0";
+  const APP_VERSION = "1.6.8";
   const SOP_SCHEMA_VERSION = 2;
   const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
   const PRESET_OVERLAY_COLORS = [
@@ -210,16 +210,16 @@
     textCell(11, 11, 3, 2, "", "blank-cell left"),
     textCell(14, 11, 3, 2, "", "blank-cell left"),
 
-    textCell(5, 13, 3, 1, "  特殊标注：", "note-cell left", {
+    textCell(5, 13, 3, 1, "  特殊标注：", "note-cell special-note-card left", {
       fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
     }),
-    textCell(8, 13, 3, 1, "  特殊标注：", "note-cell left", {
+    textCell(8, 13, 3, 1, "  特殊标注：", "note-cell special-note-card left", {
       fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
     }),
-    textCell(11, 13, 3, 1, "  特殊标注：", "note-cell left", {
+    textCell(11, 13, 3, 1, "  特殊标注：", "note-cell special-note-card left", {
       fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
     }),
-    textCell(14, 13, 3, 1, " 特殊标注：", "note-cell left", {
+    textCell(14, 13, 3, 1, " 特殊标注：", "note-cell special-note-card left", {
       fields: [{ key: "value", label: " 特殊标注：", grow: true, minChars: 6 }]
     }),
 
@@ -232,16 +232,16 @@
     textCell(11, 23, 3, 2, "", "blank-cell left"),
     textCell(14, 23, 3, 2, "", "blank-cell left"),
 
-    textCell(5, 25, 3, 1, "  特殊标注：", "note-cell left", {
+    textCell(5, 25, 3, 1, "  特殊标注：", "note-cell special-note-card left", {
       fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
     }),
-    textCell(8, 25, 3, 1, "  特殊标注：", "note-cell left", {
+    textCell(8, 25, 3, 1, "  特殊标注：", "note-cell special-note-card left", {
       fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
     }),
-    textCell(11, 25, 3, 1, "  特殊标注：", "note-cell left", {
+    textCell(11, 25, 3, 1, "  特殊标注：", "note-cell special-note-card left", {
       fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
     }),
-    textCell(14, 25, 3, 1, " 特殊标注：", "note-cell left", {
+    textCell(14, 25, 3, 1, " 特殊标注：", "note-cell special-note-card left", {
       fields: [{ key: "value", label: " 特殊标注：", grow: true, minChars: 6 }]
     }),
     textCell(5, 26, 3, 1, "  标准工时：           人员：", "note-cell left", {
@@ -358,6 +358,7 @@
   document.addEventListener("drop", handleDocumentFileDrop, true);
   document.addEventListener("dragend", clearAllImageSlotDragStates, true);
   document.addEventListener("keydown", handleDocumentKeyDown);
+  document.addEventListener("pointerdown", handleGlobalBlankPointerDown);
   document.addEventListener("focusin", handleMaterialFocus);
   document.addEventListener("click", handleMaterialDocumentClick);
   window.addEventListener("pointermove", handleGlobalPointerMove);
@@ -2792,6 +2793,17 @@
     clearGlobalSelection();
   }
 
+  function handleGlobalBlankPointerDown(event) {
+    if (event.button !== 0) return;
+    if (!globalEditor.selected && !globalEditor.drag) return;
+    if (globalEditor.drag) return;
+    const target = event.target;
+    if (!target || !target.closest) return;
+    if (target.closest(".global-edit-toolbar, .global-annotation-shape, .global-resize-handle, .global-text-box, .global-bubble-tail-handle, .image-editor-overlay")) return;
+
+    clearGlobalSelection();
+  }
+
   function startGlobalAnnotationMove(event, page, id) {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -4208,7 +4220,6 @@
   }
 
   async function readLibraryBom(fileHandle, folderHandle, folderId, folderPath, fileName) {
-    const file = await fileHandle.getFile();
     return {
       id: createLibraryFileId(folderId, fileName),
       name: fileName,
@@ -4217,7 +4228,7 @@
       fileName,
       fileHandle,
       folderHandle,
-      updatedAt: file.lastModified ? new Date(file.lastModified).toISOString() : "",
+      updatedAt: "",
       source: "folder"
     };
   }
@@ -4482,7 +4493,10 @@
           ]
         });
         if (!handle) return;
-        const file = await handle.getFile();
+        const file = await getReadableFileFromHandle(handle, {
+          request: true,
+          deniedMessage: "浏览器拒绝读取这个 BOM 文件，请重新点击“选择BOM表”并选择文件。"
+        });
         await loadBomFromFile(file, {
           id: createLibraryFileId("manual", handle.name || file.name),
           name: handle.name || file.name,
@@ -4519,7 +4533,10 @@
   async function loadBomItem(item) {
     try {
       if (item.fileHandle) {
-        const file = await item.fileHandle.getFile();
+        const file = await getReadableFileFromHandle(item.fileHandle, {
+          request: true,
+          deniedMessage: getBomFileHandleDeniedMessage(item)
+        });
         await loadBomFromFile(file, item);
         return;
       }
@@ -4536,6 +4553,60 @@
     } catch (error) {
       libraryStatusEl.textContent = `读取BOM失败：${error.message || error}`;
     }
+  }
+
+  async function getReadableFileFromHandle(fileHandle, options = {}) {
+    if (!fileHandle || typeof fileHandle.getFile !== "function") {
+      throw new Error("这个BOM历史记录缺少文件句柄，请重新选择BOM表。");
+    }
+
+    const hasPermission = await ensureFileHandleReadPermission(fileHandle, {
+      request: Boolean(options.request)
+    });
+    if (!hasPermission) {
+      throw new Error(options.deniedMessage || "没有这个BOM文件的读取权限，请重新选择BOM表。");
+    }
+
+    try {
+      return await fileHandle.getFile();
+    } catch (error) {
+      if (isFileHandleAccessDeniedError(error)) {
+        throw new Error(options.deniedMessage || "浏览器拒绝读取这个BOM文件，请重新选择BOM表。");
+      }
+      throw error;
+    }
+  }
+
+  async function ensureFileHandleReadPermission(fileHandle, options = {}) {
+    if (!fileHandle) return false;
+    if (!fileHandle.queryPermission || !fileHandle.requestPermission) return true;
+
+    try {
+      let permission = await fileHandle.queryPermission({ mode: "read" });
+      if (permission === "granted") return true;
+      if (options.request) {
+        permission = await fileHandle.requestPermission({ mode: "read" });
+      }
+      return permission === "granted";
+    } catch (error) {
+      if (isFileHandleAccessDeniedError(error)) return false;
+      return false;
+    }
+  }
+
+  function isFileHandleAccessDeniedError(error) {
+    const name = String(error && error.name || "");
+    const message = String(error && error.message || error || "");
+    return name === "NotAllowedError" ||
+      name === "SecurityError" ||
+      /not allowed|permission|denied|current context|FileSystemFileHandle|getFile/i.test(message);
+  }
+
+  function getBomFileHandleDeniedMessage(item) {
+    if (item && item.source === "folder") {
+      return "浏览器拒绝读取这个BOM文件，请点击“刷新文件夹”重新授权，或点击“选择BOM表”重新选择文件。";
+    }
+    return "浏览器拒绝读取这个BOM历史记录，请重新点击“选择BOM表”选择文件。";
   }
 
   async function loadBomFromFile(file, source = {}) {

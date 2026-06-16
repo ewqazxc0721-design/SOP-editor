@@ -8,6 +8,7 @@
   --focus: #2563eb;
   --grid-width: 1340px;
   --grid-height: 852px;
+  --process-card-inset: 10px;
   --preview-scale: 1;
   --preview-page-width: var(--grid-width);
   --preview-page-height: var(--grid-height);
@@ -142,7 +143,7 @@ button {
   padding: 0 4px;
   font-weight: 700;
   line-height: 1;
-  border-radius: 4px;
+  border-radius: 0;
   background: rgba(255, 255, 255, 0.16);
 }
 
@@ -1111,7 +1112,19 @@ button {
 }
 
 .blank-cell {
-  background: var(--image-bg);
+  margin: 0 var(--process-card-inset) var(--process-card-inset);
+  padding: 0 10px;
+  align-items: center;
+  background: #fff;
+  border-top: 0;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  font-weight: 700;
+}
+
+.blank-cell[contenteditable="true"]:empty::before {
+  content: "步骤说明待补充";
+  color: #64748b;
+  pointer-events: none;
 }
 
 .image-cell {
@@ -1139,10 +1152,37 @@ button {
   font-weight: 700;
 }
 
+.process-image {
+  margin: var(--process-card-inset) var(--process-card-inset) 0;
+  background: #fff;
+  border-bottom-style: dashed;
+  border-bottom-color: #64748b;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.process-image:focus {
+  outline-offset: -4px;
+}
+
 .note-cell {
   background: var(--note);
   font-size: 13px;
   font-weight: 700;
+}
+
+.special-note-card {
+  z-index: 1;
+  margin: 3px var(--process-card-inset) 4px;
+  padding: 0 10px;
+  align-items: center;
+  background: #fff4c4;
+  border: 1px solid #d5bd57;
+  border-radius: 0;
+  box-shadow: 0 5px 12px rgba(15, 23, 42, 0.1);
+}
+
+.special-note-card .editable-cell-value:focus {
+  box-shadow: inset 0 0 0 2px var(--focus);
 }
 
 .footer-cell {
@@ -1192,6 +1232,20 @@ button {
 .image-empty strong {
   font-size: 12px;
   font-weight: 400;
+}
+
+.process-image .image-empty {
+  color: #334155;
+  font-weight: 700;
+}
+
+.process-image .image-empty::after {
+  content: "单击选中后 Ctrl+V 粘贴，或拖入图片";
+  display: block;
+  margin-top: 4px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .image-cell[data-has-image="true"] .image-empty {
@@ -1560,6 +1614,26 @@ button {
 
 .slot-tools [data-action="delete"] {
   color: #991b1b;
+}
+
+.process-image .slot-tools {
+  right: 10px;
+  top: 10px;
+  gap: 5px;
+}
+
+.process-image .slot-tools button {
+  min-height: 26px;
+  padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border-color: #a8b3c2;
+  border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.16);
+  font-weight: 700;
+}
+
+.process-image .slot-tools [data-action="delete"] {
+  color: #ef4444;
 }
 
 .image-cell[data-has-image="false"] [data-action="edit"],
