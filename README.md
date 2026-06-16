@@ -36,4 +36,4 @@ Expected proxy API:
 - `DELETE /files/:fileId`: deletes a SOP
 - `POST /folders`: accepts `{ parentId, name }` to create a folder
 
-`documents` should contain `.sop.json` files. If a document list item does not include `project`, the page will call `GET /files/:fileId` when opening or batch-exporting that SOP.
+`documents` should contain `.sopzip` files for the new package storage format. The package contains `document.json`, `manifest.json`, `assets/`, and `thumbnails/`. If a document list item does not include `project`, the page will call `GET /files/:fileId` when opening or batch-exporting that SOP.

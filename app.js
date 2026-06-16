@@ -9,6 +9,8 @@
   const exportPptxButton = document.getElementById("export-pptx");
   const batchExportPptxButton = document.getElementById("batch-export-pptx");
   let addPageTemplateMenu = null;
+  let addStepCardButton = null;
+  let addStepCardMenu = null;
   let exportPanel = null;
   let exportPanelToggle = null;
   let exportPanelBody = null;
@@ -27,6 +29,17 @@
   let versionPanel = null;
   let versionPanelToggle = null;
   let versionPanelBody = null;
+  const globalInfoInputs = Array.from(document.querySelectorAll("[data-global-info-key]"));
+  const globalInfoReadButton = document.getElementById("global-info-read-current");
+  const globalInfoSaveButton = document.getElementById("global-info-save");
+  const globalInfoStatusEl = document.getElementById("global-info-status");
+  const globalInfoPanel = document.getElementById("global-info-panel");
+  const globalInfoLogoInput = document.getElementById("global-info-logo-input");
+  const globalInfoLogoChooseButton = document.getElementById("global-info-logo-choose");
+  const globalInfoLogoDeleteButton = document.getElementById("global-info-logo-delete");
+  const globalInfoLogoPreview = document.getElementById("global-info-logo-preview");
+  let globalInfoPanelToggle = null;
+  let globalInfoPanelBody = null;
   const openProjectInput = document.getElementById("open-project-input");
   const libraryCountEl = document.getElementById("library-count");
   const libraryStatusEl = document.getElementById("library-status");
@@ -74,8 +87,16 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.6.31";
-  const SOP_SCHEMA_VERSION = 2;
+  const APP_VERSION = "1.8.1";
+  const SOP_SCHEMA_VERSION = 3;
+  const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
+  const SOP_PACKAGE_VERSION = 1;
+  const SOP_PACKAGE_DOCUMENT_PATH = "document.json";
+  const SOP_PACKAGE_MANIFEST_PATH = "manifest.json";
+  const SOP_PACKAGE_EXTENSION = ".sopzip";
+  const LEGACY_PROJECT_EXTENSIONS = [".sop.json", ".json"];
+  const MAX_IMAGE_ASSET_BYTES = 10 * 1024 * 1024;
+  const ALLOWED_ASSET_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
   const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
   const PRESET_OVERLAY_COLORS = [
     { name: "红色", value: "#ef1d1d" },
@@ -101,7 +122,7 @@
   const PPT_ROW_FRACTIONS = [72, ...Array(26).fill(30)];
   const SOP_FILE_TYPE = "sop-template-project";
   const LIBRARY_DB_NAME = "sop-template-library";
-  const LIBRARY_DB_VERSION = 3;
+  const LIBRARY_DB_VERSION = 4;
   const DEFAULT_FOLDER_ID = "root";
   const ALL_FOLDER_ID = "all";
   const ROOT_DIRECTORY_SETTING_KEY = "rootDirectory";
@@ -112,10 +133,21 @@
   const VERSION_PANEL_COLLAPSED_KEY = "sop-version-panel-collapsed";
   const BOM_PANEL_COLLAPSED_KEY = "sop-bom-panel-collapsed";
   const SOP_HISTORY_PANEL_COLLAPSED_KEY = "sop-history-panel-collapsed";
+  const GLOBAL_INFO_PANEL_COLLAPSED_KEY = "sop-global-info-panel-collapsed";
   const FOLDER_TREE_EXPANDED_KEY = "sop-folder-tree-expanded";
   const STORAGE_MODE_LOCAL = "local";
   const STORAGE_MODE_FEISHU = "feishu";
   const BOM_HISTORY_LIMIT = 12;
+  const GLOBAL_INFO_FIELDS = [
+    { key: "productName", cellKey: "c1r1", fieldKey: "value" },
+    { key: "sopNumber", cellKey: "c1r27", fieldKey: "sopNumber" },
+    { key: "version", cellKey: "c1r27", fieldKey: "version" },
+    { key: "date", cellKey: "c1r27", fieldKey: "date" },
+    { key: "author", cellKey: "c8r27", fieldKey: "value" },
+    { key: "reviewer", cellKey: "c11r27", fieldKey: "value" },
+    { key: "approver", cellKey: "c14r27", fieldKey: "value" }
+  ];
+  const GLOBAL_INFO_LOGO_CELL_KEY = "c14r1";
   const displayableImageExtensions = [".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif", ".bmp", ".ico"];
   const logoSourceExtensions = [".ai", ".eps", ".pdf"];
   const bomFileExtensions = [".xlsx", ".xls", ".csv", ".tsv", ".txt", ".json"];
@@ -133,6 +165,14 @@
   ];
   const STEP_TEMPLATE_COUNTS = [4, 6, 8];
   const DEFAULT_STEP_TEMPLATE_COUNT = 8;
+  const FREE_STEP_TEMPLATE_COUNT = 8;
+  const FREE_STEP_CARD_SLOT_COUNT = 8;
+  const FREE_STEP_CARD_SIZE_OPTIONS = [
+    { size: "small", label: "小卡片", shortLabel: "小" },
+    { size: "medium", label: "中卡片", shortLabel: "中" },
+    { size: "large", label: "大卡片", shortLabel: "大" }
+  ];
+  const FREE_STEP_CARD_SIZE_SET = new Set(FREE_STEP_CARD_SIZE_OPTIONS.map((option) => option.size));
   const STEP_CARD_CELL_KEYS = new Set(STEP_CARD_GROUPS.flatMap((group) => [group.imageKey, group.descKey, group.noteKey]));
   const STEP_TEMPLATE_LAYOUTS = {
     4: {
@@ -182,10 +222,12 @@
   let scrollTicking = false;
   let isApplyingProject = false;
   let pendingBatchPrintRestore = null;
+  let globalInfoLogoSlot = null;
+  let globalInfoLogoPreviewUrl = "";
 
   const projectState = {
     documentId: "",
-    fileName: "未命名.sop.json",
+    fileName: "未命名.sopzip",
     fileHandle: null,
     dirty: false,
     currentVersion: 0,
@@ -193,7 +235,16 @@
     folderId: DEFAULT_FOLDER_ID,
     libraryFileId: "",
     libraryFileHandle: null,
+    globalInfo: {},
+    assets: {},
     history: []
+  };
+
+  const assetRuntime = {
+    dbPromise: null,
+    blobs: new Map(),
+    thumbnails: new Map(),
+    objectUrls: new Map()
   };
 
   const libraryState = {
@@ -269,7 +320,7 @@
       logo: true,
       label: "插入logo",
       fit: "contain",
-      accept: ".ai,.eps,.pdf,.png,.jpg,.jpeg,.svg,.webp,.gif,.bmp,.ico,image/*,application/pdf,application/postscript,application/illustrator"
+      accept: ".ai,.eps,.pdf,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp,application/pdf,application/postscript,application/illustrator"
     }),
     textCell(1, 2, 4, 1, "零件物料/治具", "section-title"),
 
@@ -370,9 +421,11 @@
 
   buildExportCollapsePanel();
   buildVersionCollapsePanel();
+  buildGlobalInfoCollapsePanel();
   buildBomCollapsePanel();
   buildSopHistoryCollapsePanel();
   buildAddPageTemplateMenu();
+  buildAddStepCardMenu();
 
   addPageButton.addEventListener("click", () => addPage({ scrollIntoView: true, stepTemplateCount: DEFAULT_STEP_TEMPLATE_COUNT }));
   deletePageButton.addEventListener("click", deleteCurrentPage);
@@ -395,6 +448,11 @@
       setBomPanelCollapsed(!bomPanel.classList.contains("is-collapsed"), { persist: true });
     });
   }
+  if (globalInfoPanelToggle) {
+    globalInfoPanelToggle.addEventListener("click", () => {
+      setGlobalInfoPanelCollapsed(!globalInfoPanel.classList.contains("is-collapsed"), { persist: true });
+    });
+  }
   if (sopHistoryPanelToggle) {
     sopHistoryPanelToggle.addEventListener("click", () => {
       setSopHistoryPanelCollapsed(!sopHistoryPanel.classList.contains("is-collapsed"), { persist: true });
@@ -408,6 +466,44 @@
     createVersionSnapshot("手动保存版本");
     markDirty();
     updateProjectUi();
+  });
+  if (globalInfoReadButton) {
+    globalInfoReadButton.addEventListener("click", readGlobalInfoFromCurrentPage);
+  }
+  if (globalInfoSaveButton) {
+    globalInfoSaveButton.addEventListener("click", () => {
+      saveAndApplyGlobalInfo().catch((error) => showFileError("同步全局信息失败", error));
+    });
+  }
+  if (globalInfoLogoChooseButton && globalInfoLogoInput) {
+    globalInfoLogoChooseButton.addEventListener("click", () => globalInfoLogoInput.click());
+  }
+  if (globalInfoLogoDeleteButton) {
+    globalInfoLogoDeleteButton.addEventListener("click", () => {
+      setGlobalInfoLogoSlot(null);
+      if (globalInfoStatusEl) {
+        globalInfoStatusEl.textContent = "Logo已清空，点击保存并同步";
+      }
+    });
+  }
+  if (globalInfoLogoInput) {
+    globalInfoLogoInput.addEventListener("change", async () => {
+      const file = globalInfoLogoInput.files && globalInfoLogoInput.files[0];
+      globalInfoLogoInput.value = "";
+      if (!file) return;
+      try {
+        await loadGlobalInfoLogoFile(file);
+      } catch (error) {
+        showFileError("插入全局Logo失败", error);
+      }
+    });
+  }
+  globalInfoInputs.forEach((input) => {
+    input.addEventListener("input", () => {
+      if (globalInfoStatusEl) {
+        globalInfoStatusEl.textContent = "未同步，点击保存并同步";
+      }
+    });
   });
   versionSelect.addEventListener("dblclick", rollbackToSelectedVersion);
   openProjectInput.addEventListener("change", handleFallbackOpenFile);
@@ -509,6 +605,7 @@
   buildMaterialSearch();
   initializeExportPanelCollapse();
   initializeVersionPanelCollapse();
+  initializeGlobalInfoPanelCollapse();
   initializeBomPanelCollapse();
   initializeSopHistoryPanelCollapse();
   initializeFolderTreeExpandedState();
@@ -564,7 +661,7 @@
       materialIndex: Number.isInteger(options.materialIndex) ? options.materialIndex : null,
       logo: Boolean(options.logo),
       fit: options.fit || (options.material ? "contain" : "cover"),
-      accept: options.accept || "image/*",
+      accept: options.accept || ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp",
       label: options.label || "插入图片",
       cellKey: options.cellKey || `c${col}r${row}`
     };
@@ -605,9 +702,13 @@
 
   function addPage(options = {}) {
     const page = buildPage(nextPageId++, {
-      stepTemplateCount: options.stepTemplateCount
+      stepTemplateCount: options.stepTemplateCount,
+      stepCards: options.stepCards
     });
     pagesEl.appendChild(page);
+    if (hasGlobalInfoValues()) {
+      applyGlobalInfoToPage(page).catch((error) => showFileError("应用全局信息失败", error));
+    }
     updatePageNumbers();
     setCurrentPage(page.dataset.pageId);
     markDirty();
@@ -624,6 +725,9 @@
     page.dataset.stepTemplateCount = String(stepTemplateCount);
     page._globalAnnotationModels = [];
     page._globalTextModels = [];
+    if (isFreeStepTemplateCount(stepTemplateCount)) {
+      page._stepCards = normalizeFreeStepCards(options.stepCards);
+    }
     const scale = document.createElement("div");
     scale.className = "sop-scale";
     const sheet = document.createElement("div");
@@ -639,9 +743,10 @@
         sheet.appendChild(cell);
       });
 
-    sheet.appendChild(buildGlobalOverlay(page));
     scale.appendChild(sheet);
     page.appendChild(scale);
+    sheet.appendChild(buildGlobalOverlay(page));
+    renderFreeStepCardCells(page);
     setupStepCards(page);
     setupMaterialCards(page);
     renderGlobalPageOverlays(page);
@@ -661,10 +766,24 @@
     return normalizeStepTemplateCount(pageData && pageData.stepTemplateCount);
   }
 
+  function isFreeStepTemplateCount(stepTemplateCount) {
+    return normalizeStepTemplateCount(stepTemplateCount) === FREE_STEP_TEMPLATE_COUNT;
+  }
+
+  function isFreeStepPage(page) {
+    return Boolean(page && isFreeStepTemplateCount(getPageStepTemplateCount(page)));
+  }
+
+  function getBaseTemplateCells() {
+    return templateCells.filter((definition) => !STEP_CARD_CELL_KEYS.has(definition.cellKey));
+  }
+
   function getTemplateCells(stepTemplateCount = DEFAULT_STEP_TEMPLATE_COUNT) {
-    return templateCells
-      .filter((definition) => !STEP_CARD_CELL_KEYS.has(definition.cellKey))
-      .concat(buildStepTemplateCells(stepTemplateCount));
+    const count = normalizeStepTemplateCount(stepTemplateCount);
+    if (isFreeStepTemplateCount(count)) {
+      return getBaseTemplateCells();
+    }
+    return getBaseTemplateCells().concat(buildStepTemplateCells(count));
   }
 
   function buildStepTemplateCells(stepTemplateCount = DEFAULT_STEP_TEMPLATE_COUNT) {
@@ -680,6 +799,9 @@
   }
 
   function getStepCardGroups(page) {
+    if (isFreeStepPage(page)) {
+      return getFreeStepCardGroups(page);
+    }
     return getStepCardGroupsForCount(getPageStepTemplateCount(page));
   }
 
@@ -706,6 +828,198 @@
     return groups;
   }
 
+  function normalizeFreeStepCardSize(size) {
+    return FREE_STEP_CARD_SIZE_SET.has(size) ? size : "small";
+  }
+
+  function getFreeStepCardSizeLabel(size) {
+    const option = FREE_STEP_CARD_SIZE_OPTIONS.find((item) => item.size === normalizeFreeStepCardSize(size));
+    return option ? option.label : "小卡片";
+  }
+
+  function getFreeStepCardSpan(size) {
+    const normalized = normalizeFreeStepCardSize(size);
+    if (normalized === "large") return { cols: 2, rows: 2 };
+    if (normalized === "medium") return { cols: 2, rows: 1 };
+    return { cols: 1, rows: 1 };
+  }
+
+  function createFreeStepCard(size = "small", data = {}) {
+    return {
+      id: data.id || createId("step-card"),
+      size: normalizeFreeStepCardSize(data.size || size),
+      imageSlot: data.imageSlot ? structuredCloneSafe(data.imageSlot) : null,
+      descCell: data.descCell ? structuredCloneSafe(data.descCell) : null,
+      noteCell: data.noteCell ? structuredCloneSafe(data.noteCell) : null
+    };
+  }
+
+  function normalizeFreeStepCards(cards) {
+    const source = Array.isArray(cards) ?
+      cards :
+      Array.from({ length: FREE_STEP_CARD_SLOT_COUNT }, () => ({ size: "small" }));
+    return source.map((card) => createFreeStepCard(card && card.size, card || {}));
+  }
+
+  function getFreeStepCards(page) {
+    if (!page) return [];
+    if (!Array.isArray(page._stepCards)) {
+      page._stepCards = normalizeFreeStepCards([]);
+    }
+    return page._stepCards;
+  }
+
+  function getFreeStepSlot(slotIndex) {
+    const colIndex = slotIndex % 4;
+    const rowIndex = Math.floor(slotIndex / 4);
+    return {
+      slotIndex,
+      colIndex,
+      rowIndex,
+      col: 5 + colIndex * 3,
+      imageRow: rowIndex === 0 ? 2 : 14,
+      descRow: rowIndex === 0 ? 11 : 23,
+      noteRow: rowIndex === 0 ? 13 : 25
+    };
+  }
+
+  function getFreeStepCardCellKey(cardId, role) {
+    return `step-${cardId}-${role}`;
+  }
+
+  function getFreeStepOccupiedSlots(slotIndex, size) {
+    const span = getFreeStepCardSpan(size);
+    const slot = getFreeStepSlot(slotIndex);
+    const slots = [];
+    for (let rowOffset = 0; rowOffset < span.rows; rowOffset += 1) {
+      for (let colOffset = 0; colOffset < span.cols; colOffset += 1) {
+        slots.push((slot.rowIndex + rowOffset) * 4 + slot.colIndex + colOffset);
+      }
+    }
+    return slots;
+  }
+
+  function canPlaceFreeStepCard(occupied, slotIndex, size) {
+    const span = getFreeStepCardSpan(size);
+    const slot = getFreeStepSlot(slotIndex);
+    if (slot.colIndex + span.cols > 4 || slot.rowIndex + span.rows > 2) return false;
+    return getFreeStepOccupiedSlots(slotIndex, size).every((index) => index >= 0 && index < FREE_STEP_CARD_SLOT_COUNT && !occupied[index]);
+  }
+
+  function buildFreeStepCardDefinitions(card, slotIndex) {
+    const size = normalizeFreeStepCardSize(card && card.size);
+    const span = getFreeStepCardSpan(size);
+    const slot = getFreeStepSlot(slotIndex);
+    const colSpan = span.cols * 3;
+    const isLarge = size === "large";
+    const imageRow = isLarge ? 2 : slot.imageRow;
+    const imageRowSpan = isLarge ? 21 : 9;
+    const descRow = isLarge ? 23 : slot.descRow;
+    const noteRow = isLarge ? 25 : slot.noteRow;
+    const cardId = card.id;
+
+    return {
+      image: imageCell(slot.col, imageRow, colSpan, imageRowSpan, {
+        cellKey: getFreeStepCardCellKey(cardId, "image")
+      }),
+      desc: textCell(slot.col, descRow, colSpan, 2, "", "blank-cell left", {
+        cellKey: getFreeStepCardCellKey(cardId, "desc")
+      }),
+      note: textCell(slot.col, noteRow, colSpan, 1, "  特殊标注：", "note-cell special-note-card left", {
+        cellKey: getFreeStepCardCellKey(cardId, "note"),
+        fields: [{ key: "value", label: "  特殊标注：", grow: true, minChars: 6 }]
+      })
+    };
+  }
+
+  function layoutFreeStepCards(cards) {
+    const occupied = Array.from({ length: FREE_STEP_CARD_SLOT_COUNT }, () => false);
+    const placements = [];
+    for (const card of cards || []) {
+      const size = normalizeFreeStepCardSize(card && card.size);
+      let slotIndex = -1;
+      for (let index = 0; index < FREE_STEP_CARD_SLOT_COUNT; index += 1) {
+        if (canPlaceFreeStepCard(occupied, index, size)) {
+          slotIndex = index;
+          break;
+        }
+      }
+      if (slotIndex < 0) {
+        return { ok: false, placements, failedCard: card };
+      }
+      getFreeStepOccupiedSlots(slotIndex, size).forEach((index) => {
+        occupied[index] = true;
+      });
+      placements.push({
+        card,
+        slotIndex,
+        definitions: buildFreeStepCardDefinitions(card, slotIndex)
+      });
+    }
+    return { ok: true, placements };
+  }
+
+  function getFreeStepCardGroups(page) {
+    const layout = layoutFreeStepCards(getFreeStepCards(page));
+    if (!layout.ok) return [];
+    return layout.placements.map((placement) => {
+      const definitions = placement.definitions;
+      return {
+        imageKey: definitions.image.cellKey,
+        descKey: definitions.desc.cellKey,
+        noteKey: definitions.note.cellKey,
+        col: definitions.image.col,
+        colSpan: definitions.image.colSpan,
+        imageRow: definitions.image.row,
+        descRow: definitions.desc.row,
+        noteRow: definitions.note.row,
+        cardId: placement.card.id,
+        size: normalizeFreeStepCardSize(placement.card.size)
+      };
+    });
+  }
+
+  function renderFreeStepCardCells(page) {
+    if (!isFreeStepPage(page)) return;
+    const sheet = getGlobalSheet(page);
+    if (!sheet) return;
+
+    sheet.querySelectorAll(".free-step-card-cell").forEach((cell) => cell.remove());
+    const layout = layoutFreeStepCards(getFreeStepCards(page));
+    if (!layout.ok) {
+      page.dataset.freeStepLayoutError = "true";
+      return;
+    }
+    delete page.dataset.freeStepLayoutError;
+
+    const overlay = getGlobalOverlay(page);
+    const insertCell = (cell) => {
+      if (overlay && overlay.parentNode === sheet) {
+        sheet.insertBefore(cell, overlay);
+      } else {
+        sheet.appendChild(cell);
+      }
+    };
+
+    layout.placements.forEach((placement, index) => {
+      [
+        { definition: placement.definitions.image, role: "image" },
+        { definition: placement.definitions.desc, role: "desc" },
+        { definition: placement.definitions.note, role: "note" }
+      ].forEach(({ definition, role }) => {
+        const cell = definition.kind === "image" ? buildImageSlot(definition) : buildTextCell(definition);
+        cell.style.gridColumn = `${definition.col} / span ${definition.colSpan}`;
+        cell.style.gridRow = `${definition.row} / span ${definition.rowSpan}`;
+        cell.classList.add("free-step-card-cell");
+        cell.dataset.freeStepCardId = placement.card.id;
+        cell.dataset.stepCardIndex = String(index);
+        cell.dataset.stepCardRole = role;
+        cell.dataset.stepCardSize = normalizeFreeStepCardSize(placement.card.size);
+        insertCell(cell);
+      });
+    });
+  }
+
   function setupStepCards(page) {
     getStepCardGroups(page).forEach((group, index) => {
       const elements = getStepCardElements(page, index);
@@ -728,6 +1042,9 @@
       });
       if (elements.image) {
         addStepCardDragHandle(elements.image, page, index);
+        if (isFreeStepPage(page)) {
+          addFreeStepCardDeleteButton(elements.image, page, index);
+        }
       }
     });
   }
@@ -755,6 +1072,8 @@
     const handle = document.createElement("button");
     handle.type = "button";
     handle.className = "step-card-drag-handle";
+    handle.draggable = true;
+    handle.setAttribute("draggable", "true");
     handle.title = "拖动排序";
     handle.setAttribute("aria-label", "拖动步骤卡片排序");
     handle.innerHTML = `
@@ -768,6 +1087,8 @@
     handle.addEventListener("mousedown", (event) => {
       startStepCardPointerDrag(event, page, index);
     });
+    handle.addEventListener("dragstart", (event) => handleStepCardDragStart(event, page, index));
+    handle.addEventListener("dragend", clearStepCardDragState);
     handle.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -778,6 +1099,27 @@
       selectStepCard(page, index);
     });
     imageSlot.appendChild(handle);
+  }
+
+  function addFreeStepCardDeleteButton(imageSlot, page, index) {
+    if (imageSlot.querySelector(".free-step-card-delete-button")) return;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "free-step-card-delete-button";
+    button.title = "删除步骤卡片";
+    button.setAttribute("aria-label", "删除步骤卡片");
+    button.innerHTML = `<span aria-hidden="true">×</span>`;
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      try {
+        await deleteFreeStepCard(page, index);
+      } catch (error) {
+        showFileError("删除步骤卡片失败", error);
+      }
+    });
+    imageSlot.appendChild(button);
   }
 
   function shouldIgnoreStepCardPointer(event) {
@@ -1004,6 +1346,18 @@
       closeImageEditor();
     }
 
+    if (isFreeStepPage(page)) {
+      syncFreeStepCardsFromDom(page);
+      const cards = getFreeStepCards(page);
+      const [moved] = cards.splice(sourceIndex, 1);
+      cards.splice(targetIndex, 0, moved);
+      await applyFreeStepCardModels(page);
+      activeImageSlot = null;
+      selectStepCard(page, targetIndex);
+      markDirty();
+      return;
+    }
+
     const cards = groups.map((_, index) => captureStepCardData(page, index));
     const [moved] = cards.splice(sourceIndex, 1);
     cards.splice(targetIndex, 0, moved);
@@ -1022,11 +1376,77 @@
 
   function captureStepCardData(page, index) {
     const elements = getStepCardElements(page, index);
-    return {
+    const data = {
       imageSlot: elements.image ? serializeImageSlot(elements.image) : null,
       descCell: elements.desc ? serializeTextCell(elements.desc) : null,
       noteCell: elements.note ? serializeTextCell(elements.note) : null
     };
+    if (isFreeStepPage(page)) {
+      data.size = normalizeFreeStepCardSize(getFreeStepCards(page)[index] && getFreeStepCards(page)[index].size);
+    }
+    return data;
+  }
+
+  function syncFreeStepCardsFromDom(page) {
+    if (!isFreeStepPage(page)) return;
+    page._stepCards = getFreeStepCards(page).map((card, index) => ({
+      ...card,
+      ...captureStepCardData(page, index)
+    }));
+  }
+
+  async function applyFreeStepCardModels(page) {
+    if (!isFreeStepPage(page)) return;
+    renderFreeStepCardCells(page);
+    setupStepCards(page);
+    const cards = getFreeStepCards(page);
+    for (let index = 0; index < cards.length; index += 1) {
+      await applyStepCardData(page, index, cards[index]);
+    }
+    renderStepCardSelection();
+  }
+
+  async function deleteFreeStepCard(page, index) {
+    if (!isFreeStepPage(page)) return false;
+    const cards = getFreeStepCards(page);
+    if (!cards[index]) return false;
+    if (editor.isOpen && editor.slot && page.contains(editor.slot)) {
+      closeImageEditor();
+    }
+    syncFreeStepCardsFromDom(page);
+    getFreeStepCards(page).splice(index, 1);
+    await applyFreeStepCardModels(page);
+    activeImageSlot = null;
+    const nextIndex = Math.min(index, getFreeStepCards(page).length - 1);
+    if (nextIndex >= 0) {
+      selectStepCard(page, nextIndex);
+    } else {
+      clearStepCardSelection();
+    }
+    markDirty();
+    return true;
+  }
+
+  async function addFreeStepCardToCurrentPage(size) {
+    const page = getCurrentPage();
+    if (!isFreeStepPage(page)) return false;
+    if (editor.isOpen && editor.slot && page.contains(editor.slot)) {
+      closeImageEditor();
+    }
+    syncFreeStepCardsFromDom(page);
+    const cards = getFreeStepCards(page);
+    const nextCard = createFreeStepCard(size);
+    const nextCards = cards.concat(nextCard);
+    const layout = layoutFreeStepCards(nextCards);
+    if (!layout.ok) {
+      showFileError("添加步骤卡片失败", new Error("当前页面剩余槽位不足，不能再添加这个尺寸的卡片。"));
+      return false;
+    }
+    page._stepCards = nextCards;
+    await applyFreeStepCardModels(page);
+    selectStepCard(page, nextCards.length - 1);
+    markDirty();
+    return true;
   }
 
   async function applyStepCardData(page, index, data) {
@@ -1064,6 +1484,37 @@
     if (editor.isOpen && editor.slot && selected.page.contains(editor.slot)) {
       closeImageEditor();
     }
+
+    if (isFreeStepPage(selected.page)) {
+      syncFreeStepCardsFromDom(selected.page);
+      const cards = getFreeStepCards(selected.page);
+      const clonedData = cloneStepCardData(stepCardClipboard, { regenerateIds: true });
+      const copiedCard = createFreeStepCard(clonedData.size || (cards[selected.index] && cards[selected.index].size) || "small", clonedData);
+      const insertedCards = cards.slice();
+      insertedCards.splice(selected.index + 1, 0, copiedCard);
+      if (layoutFreeStepCards(insertedCards).ok) {
+        selected.page._stepCards = insertedCards;
+        await applyFreeStepCardModels(selected.page);
+        selectStepCard(selected.page, selected.index + 1);
+        markDirty();
+        return true;
+      }
+
+      const replacementCards = cards.slice();
+      const targetId = cards[selected.index] && cards[selected.index].id;
+      replacementCards[selected.index] = createFreeStepCard(copiedCard.size, {
+        ...copiedCard,
+        id: targetId || copiedCard.id
+      });
+      if (layoutFreeStepCards(replacementCards).ok) {
+        selected.page._stepCards = replacementCards;
+        await applyFreeStepCardModels(selected.page);
+        selectStepCard(selected.page, selected.index);
+        markDirty();
+        return true;
+      }
+    }
+
     await applyStepCardData(selected.page, selected.index, cloneStepCardData(stepCardClipboard, {
       regenerateIds: true
     }));
@@ -1580,6 +2031,245 @@
     return cell.querySelector(".editable-cell-value");
   }
 
+  function emptyGlobalInfo() {
+    const values = GLOBAL_INFO_FIELDS.reduce((result, field) => {
+      result[field.key] = "";
+      return result;
+    }, {});
+    values.logoSlot = null;
+    return values;
+  }
+
+  function normalizeGlobalInfo(value) {
+    const source = value && typeof value === "object" ? value : {};
+    const normalized = emptyGlobalInfo();
+    GLOBAL_INFO_FIELDS.forEach((field) => {
+      normalized[field.key] = String(source[field.key] || "");
+    });
+    normalized.logoSlot = normalizeGlobalLogoSlot(source.logoSlot);
+    return normalized;
+  }
+
+  function hasGlobalInfoValues(info = projectState.globalInfo) {
+    const normalized = normalizeGlobalInfo(info);
+    return GLOBAL_INFO_FIELDS.some((field) => String(normalized[field.key] || "").trim() !== "") ||
+      Boolean(normalized.logoSlot);
+  }
+
+  function readGlobalInfoFromControls() {
+    const values = emptyGlobalInfo();
+    globalInfoInputs.forEach((input) => {
+      values[input.dataset.globalInfoKey] = input.value || "";
+    });
+    values.logoSlot = normalizeGlobalLogoSlot(globalInfoLogoSlot);
+    return values;
+  }
+
+  function updateGlobalInfoControls(values = projectState.globalInfo) {
+    const normalized = normalizeGlobalInfo(values);
+    globalInfoInputs.forEach((input) => {
+      input.value = normalized[input.dataset.globalInfoKey] || "";
+    });
+    setGlobalInfoLogoSlot(normalized.logoSlot, { silent: true });
+    if (globalInfoStatusEl) {
+      globalInfoStatusEl.textContent = "仅保存在当前 SOP 中";
+    }
+  }
+
+  function getGlobalInfoFromPage(page) {
+    const values = emptyGlobalInfo();
+    GLOBAL_INFO_FIELDS.forEach((field) => {
+      const cell = getPageCellByKey(page, field.cellKey);
+      const valueElement = getTextCellValueElement(cell, field.fieldKey);
+      values[field.key] = valueElement ? valueElement.textContent || "" : "";
+    });
+    const logoSlot = getGlobalInfoLogoSlotFromPage(page);
+    values.logoSlot = logoSlot && logoSlot.dataset.hasImage === "true" ? serializeImageSlot(logoSlot) : null;
+    return values;
+  }
+
+  function readGlobalInfoFromCurrentPage() {
+    const page = getCurrentPage();
+    if (!page) return;
+    const values = getGlobalInfoFromPage(page);
+    updateGlobalInfoControls(values);
+    if (globalInfoStatusEl) {
+      globalInfoStatusEl.textContent = "已读取当前页，点击保存并同步";
+    }
+  }
+
+  function setGlobalInfoField(page, field, value) {
+    const cell = getPageCellByKey(page, field.cellKey);
+    const valueElement = getTextCellValueElement(cell, field.fieldKey);
+    if (valueElement) {
+      valueElement.textContent = value || "";
+    }
+  }
+
+  async function applyGlobalInfoToPage(page, values = projectState.globalInfo) {
+    if (!page) return;
+    const normalized = normalizeGlobalInfo(values);
+    GLOBAL_INFO_FIELDS.forEach((field) => {
+      setGlobalInfoField(page, field, normalized[field.key]);
+    });
+    await setGlobalInfoLogoForPage(page, normalized.logoSlot);
+  }
+
+  async function applyGlobalInfoToAllPages(values = projectState.globalInfo) {
+    for (const page of getPages()) {
+      await applyGlobalInfoToPage(page, values);
+    }
+  }
+
+  async function saveAndApplyGlobalInfo() {
+    projectState.globalInfo = normalizeGlobalInfo(readGlobalInfoFromControls());
+    await applyGlobalInfoToAllPages(projectState.globalInfo);
+    markDirty();
+    if (globalInfoStatusEl) {
+      globalInfoStatusEl.textContent = "已同步到当前 SOP 的所有页面";
+    }
+  }
+
+  function normalizeGlobalLogoSlot(slotData) {
+    if (!slotData || typeof slotData !== "object" || slotData.hasImage !== true) return null;
+    const clone = structuredCloneSafe(slotData);
+    clone.key = GLOBAL_INFO_LOGO_CELL_KEY;
+    clone.hasImage = true;
+    clone.logo = true;
+    clone.fit = "contain";
+    clone.mediaKind = clone.mediaKind === "source" ? "source" : "image";
+    clone.assetId = clone.mediaKind === "image" ? clone.assetId || null : null;
+    clone.imageState = {
+      naturalWidth: Number(clone.imageState && clone.imageState.naturalWidth) || 0,
+      naturalHeight: Number(clone.imageState && clone.imageState.naturalHeight) || 0,
+      scale: Number(clone.imageState && clone.imageState.scale) || 1,
+      x: Number(clone.imageState && clone.imageState.x) || 0,
+      y: Number(clone.imageState && clone.imageState.y) || 0
+    };
+    clone.sourceInfo = clone.mediaKind === "source" && clone.sourceInfo ? { ...clone.sourceInfo } : null;
+    clone.annotations = Array.isArray(clone.annotations) ? clone.annotations.map(cloneModel) : [];
+    clone.texts = Array.isArray(clone.texts) ? clone.texts.map(cloneModel) : [];
+    if (clone.mediaKind === "image" && !clone.assetId) return null;
+    return clone;
+  }
+
+  function getGlobalInfoLogoSlotFromPage(page) {
+    return page ? page.querySelector(`.image-cell[data-logo="true"][data-cell-key="${GLOBAL_INFO_LOGO_CELL_KEY}"]`) : null;
+  }
+
+  async function setGlobalInfoLogoForPage(page, logoSlotData) {
+    const logoSlot = getGlobalInfoLogoSlotFromPage(page);
+    if (!logoSlot) return;
+    if (!logoSlotData) {
+      deleteImage(logoSlot, { keepFocus: false });
+      return;
+    }
+    await applyImageSlotData(logoSlot, {
+      ...logoSlotData,
+      key: logoSlot.dataset.cellKey || GLOBAL_INFO_LOGO_CELL_KEY,
+      fit: "contain",
+      logo: true
+    });
+  }
+
+  async function loadGlobalInfoLogoFile(file) {
+    if (!file) return;
+    const extension = getFileExtension(file.name);
+    const isImage = ALLOWED_ASSET_IMAGE_MIMES.has(normalizeAssetMime(file.type || getImageMimeType(file.name || "")));
+    if (!isImage) {
+      if (!isLogoSourceExtension(extension)) {
+        throw new Error("全局Logo只支持 PNG、JPG、WebP 图片，或 AI/EPS/PDF 源文件。");
+      }
+      setGlobalInfoLogoSlot({
+        key: GLOBAL_INFO_LOGO_CELL_KEY,
+        hasImage: true,
+        mediaKind: "source",
+        fit: "contain",
+        logo: true,
+        assetId: null,
+        imageState: createImageState(),
+        sourceInfo: {
+          type: extension.replace(".", "").toUpperCase() || "SOURCE",
+          name: file.name || "logo source file"
+        },
+        annotations: [],
+        texts: []
+      });
+      if (globalInfoStatusEl) {
+        globalInfoStatusEl.textContent = "Logo已更新，点击保存并同步";
+      }
+      return;
+    }
+
+    const asset = await createImageAssetFromBlob(projectState.documentId, file, "file", { fileName: file.name || "" });
+    setGlobalInfoLogoSlot({
+      key: GLOBAL_INFO_LOGO_CELL_KEY,
+      hasImage: true,
+      mediaKind: "image",
+      fit: "contain",
+      logo: true,
+      assetId: asset.id,
+      imageState: {
+        naturalWidth: asset.width,
+        naturalHeight: asset.height,
+        scale: 1,
+        x: 0,
+        y: 0
+      },
+      sourceInfo: null,
+      annotations: [],
+      texts: []
+    });
+    if (globalInfoStatusEl) {
+      globalInfoStatusEl.textContent = "Logo已更新，点击保存并同步";
+    }
+  }
+
+  function setGlobalInfoLogoSlot(slotData, options = {}) {
+    globalInfoLogoSlot = normalizeGlobalLogoSlot(slotData);
+    renderGlobalInfoLogoPreview(globalInfoLogoSlot);
+    if (!options.silent && globalInfoStatusEl) {
+      globalInfoStatusEl.textContent = "未同步，点击保存并同步";
+    }
+  }
+
+  async function renderGlobalInfoLogoPreview(slotData) {
+    if (!globalInfoLogoPreview) return;
+    if (globalInfoLogoPreviewUrl) {
+      URL.revokeObjectURL(globalInfoLogoPreviewUrl);
+      globalInfoLogoPreviewUrl = "";
+    }
+    globalInfoLogoPreview.replaceChildren();
+    if (!slotData) {
+      globalInfoLogoPreview.textContent = "未设置logo";
+      globalInfoLogoPreview.classList.remove("has-logo");
+      if (globalInfoLogoDeleteButton) globalInfoLogoDeleteButton.disabled = true;
+      return;
+    }
+    globalInfoLogoPreview.classList.add("has-logo");
+    if (globalInfoLogoDeleteButton) globalInfoLogoDeleteButton.disabled = false;
+
+    if (slotData.mediaKind === "source" && slotData.sourceInfo) {
+      const type = document.createElement("strong");
+      type.textContent = slotData.sourceInfo.type || "SOURCE";
+      const name = document.createElement("span");
+      name.textContent = slotData.sourceInfo.name || "logo source file";
+      globalInfoLogoPreview.append(type, name);
+      return;
+    }
+
+    const blob = await getAssetBlob(slotData.assetId);
+    if (!blob || globalInfoLogoSlot !== slotData) {
+      globalInfoLogoPreview.textContent = "Logo资源缺失";
+      return;
+    }
+    globalInfoLogoPreviewUrl = URL.createObjectURL(blob);
+    const img = document.createElement("img");
+    img.alt = "全局Logo";
+    img.src = globalInfoLogoPreviewUrl;
+    globalInfoLogoPreview.appendChild(img);
+  }
+
   function getTextCellPersistedText(cell) {
     if (!cell) return "";
     return cell.textContent || "";
@@ -1775,12 +2465,17 @@
     editButton.addEventListener("click", () => openImageEditor(slot));
     deleteButton.addEventListener("click", () => deleteImage(slot));
 
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       const file = input.files && input.files[0];
       if (!file) return;
 
-      loadImageFile(slot, file);
-      input.value = "";
+      try {
+        await loadImageFile(slot, file);
+      } catch (error) {
+        showFileError("插入图片失败", error);
+      } finally {
+        input.value = "";
+      }
     });
 
     img.addEventListener("load", () => {
@@ -2117,7 +2812,9 @@
       button.append(primary, detail);
       button.addEventListener("click", () => {
         if (activeMaterialSearchCell) {
-          applyBomItemToMaterial(activeMaterialSearchCell, item);
+          applyBomItemToMaterial(activeMaterialSearchCell, item).catch((error) => {
+            showFileError("填入物料失败", error);
+          });
         }
         hideMaterialSearch();
       });
@@ -2146,11 +2843,13 @@
       return normalizeSearchText(target) === value;
     });
     if (match) {
-      applyBomItemToMaterial(cell, match, { keepSearchOpen: true });
+      applyBomItemToMaterial(cell, match, { keepSearchOpen: true }).catch((error) => {
+        showFileError("填入物料失败", error);
+      });
     }
   }
 
-  function applyBomItemToMaterial(sourceCell, item, options = {}) {
+  async function applyBomItemToMaterial(sourceCell, item, options = {}) {
     const index = sourceCell.dataset.materialIndex;
     const page = sourceCell.closest(".sop-page");
     if (!page || index === undefined) return;
@@ -2164,7 +2863,7 @@
     if (nameCell) setMaterialFieldValue(nameCell, "name", item.name || "");
     if (specCell) setMaterialFieldValue(specCell, "spec", item.spec || "");
     if (imageSlot && item.imageSrc) {
-      loadImageSource(imageSlot, item.imageSrc, { keepOverlays: false });
+      await loadImageSource(imageSlot, item.imageSrc, { keepOverlays: false });
     }
 
     highlightBomPreviewRow(item);
@@ -4112,7 +4811,7 @@
     }
   }
 
-  function loadImageFile(slot, file) {
+  async function loadImageFile(slot, file, options = {}) {
     if (!file) return;
     const extension = getFileExtension(file.name);
     const isImage = file.type.startsWith("image/") || isDisplayableImageExtension(extension);
@@ -4123,21 +4822,24 @@
       return;
     }
 
-    clearObjectUrl(slot);
-    clearSlotOverlays(slot);
-    slot._sourceInfo = null;
-    const img = slot.querySelector("img");
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      slot.dataset.mediaKind = "image";
-      img.src = String(reader.result);
-      markDirty();
+    await loadImageBlob(slot, file, {
+      source: options.source || "file",
+      fileName: file.name || ""
     });
-    reader.readAsDataURL(file);
   }
 
-  function loadImageSource(slot, src, options = {}) {
+  async function loadImageSource(slot, src, options = {}) {
     if (!slot || !src) return;
+    const blob = await imageSourceToBlob(src);
+    await loadImageBlob(slot, blob, {
+      source: options.source || "file",
+      fileName: options.fileName || "",
+      keepOverlays: Boolean(options.keepOverlays)
+    });
+  }
+
+  async function loadImageBlob(slot, blob, options = {}) {
+    if (!slot || !blob) return;
     clearObjectUrl(slot);
     if (!options.keepOverlays) {
       clearSlotOverlays(slot);
@@ -4145,8 +4847,15 @@
     slot._sourceInfo = null;
     const img = slot.querySelector("img");
     if (!img) return;
+    const asset = await createImageAssetFromBlob(projectState.documentId, blob, options.source || "file", {
+      fileName: options.fileName || ""
+    });
+    const objectUrl = await createObjectUrlForAsset(asset.id);
+    slot._imageState.objectUrl = objectUrl;
+    slot.dataset.assetId = asset.id;
     slot.dataset.mediaKind = "image";
-    img.src = String(src);
+    slot.classList.remove("is-missing-asset");
+    img.src = objectUrl;
     markDirty();
   }
 
@@ -4201,8 +4910,10 @@
 
     Object.assign(slot._imageState, createImageState());
     slot._sourceInfo = null;
+    slot.dataset.assetId = "";
     slot.dataset.hasImage = "false";
     slot.dataset.mediaKind = "empty";
+    slot.classList.remove("is-missing-asset");
   }
 
   function clearObjectUrl(slot) {
@@ -4347,7 +5058,7 @@
     }
   }
 
-  function handleDocumentFileDrop(event) {
+  async function handleDocumentFileDrop(event) {
     if (!isFileDragEvent(event)) return;
     event.preventDefault();
 
@@ -4360,7 +5071,11 @@
     if (!file) return;
 
     activateImageSlot(slot);
-    loadImageFile(slot, file);
+    try {
+      await loadImageFile(slot, file);
+    } catch (error) {
+      showFileError("拖入图片失败", error);
+    }
   }
 
   function isFileDragEvent(event) {
@@ -4400,7 +5115,7 @@
   function isSupportedImageSlotFile(slot, file) {
     if (!file) return false;
     const extension = getFileExtension(file.name);
-    const isImage = String(file.type || "").startsWith("image/") || isDisplayableImageExtension(extension);
+    const isImage = ALLOWED_ASSET_IMAGE_MIMES.has(normalizeAssetMime(file.type || getImageMimeType(file.name || "")));
     if (isImage) return true;
     return isLogoSlot(slot) && isLogoSourceExtension(extension);
   }
@@ -4415,13 +5130,11 @@
     document.querySelectorAll(".image-cell.is-drag-over").forEach(clearImageSlotDragState);
   }
 
-  function handleDocumentPaste(event) {
+  async function handleDocumentPaste(event) {
     const clipboard = event.clipboardData;
     if (!clipboard) return;
 
-    const imageItem = Array.from(clipboard.items || []).find((item) => {
-      return item.kind === "file" && item.type.startsWith("image/");
-    });
+    const imageItem = getPreferredClipboardImageItem(clipboard);
     if (!imageItem) return;
 
     const slot = editor.isOpen ? editor.slot : getPasteTarget(event.target);
@@ -4432,7 +5145,22 @@
 
     event.preventDefault();
     activateImageSlot(slot);
-    loadImageFile(slot, file);
+    try {
+      await loadImageFile(slot, file, { source: "clipboard" });
+    } catch (error) {
+      showFileError("粘贴图片失败", error);
+    }
+  }
+
+  function getPreferredClipboardImageItem(clipboard) {
+    const items = Array.from(clipboard && clipboard.items || []).filter((item) => {
+      return item.kind === "file" && ALLOWED_ASSET_IMAGE_MIMES.has(normalizeAssetMime(item.type));
+    });
+    if (!items.length) return null;
+    const priority = ["image/png", "image/webp", "image/jpeg"];
+    return items.sort((a, b) => {
+      return priority.indexOf(normalizeAssetMime(a.type)) - priority.indexOf(normalizeAssetMime(b.type));
+    })[0];
   }
 
   async function handleDocumentKeyDown(event) {
@@ -4485,6 +5213,19 @@
     if (["Delete", "Backspace"].includes(event.key) && globalEditor.selected && !isTyping) {
       event.preventDefault();
       deleteSelectedGlobalItem();
+      return;
+    }
+
+    if (["Delete", "Backspace"].includes(event.key) && selectedStepCard && !isTyping && !editor.isOpen) {
+      const selected = getSelectedStepCard();
+      if (selected && isFreeStepPage(selected.page)) {
+        event.preventDefault();
+        try {
+          await deleteFreeStepCard(selected.page, selected.index);
+        } catch (error) {
+          showFileError("删除步骤卡片失败", error);
+        }
+      }
     }
   }
 
@@ -4517,7 +5258,7 @@
     }
   }
 
-  function initializeProjectState(fileName = "未命名.sop.json", fileHandle = null, options = {}) {
+  function initializeProjectState(fileName = "未命名.sopzip", fileHandle = null, options = {}) {
     projectState.documentId = options.documentId || createId("doc");
     projectState.fileName = fileName;
     projectState.fileHandle = fileHandle;
@@ -4527,8 +5268,12 @@
     projectState.folderId = options.folderId || DEFAULT_FOLDER_ID;
     projectState.libraryFileId = options.libraryFileId || "";
     projectState.libraryFileHandle = options.libraryFileHandle || null;
+    projectState.globalInfo = normalizeGlobalInfo(options.globalInfo);
+    projectState.assets = normalizeAssetRecords(options.assets || {});
     projectState.history = [];
+    updateGlobalInfoControls(projectState.globalInfo);
     createVersionSnapshot("初始版本", { keepClean: true });
+    updateGlobalInfoControls(projectState.globalInfo);
     markClean();
   }
 
@@ -4564,9 +5309,11 @@
     isApplyingProject = true;
     pagesEl.replaceChildren();
     resetRuntimeCounters();
+    projectState.globalInfo = normalizeGlobalInfo({});
+    updateGlobalInfoControls(projectState.globalInfo);
     addPage();
     isApplyingProject = false;
-    initializeProjectState("未命名.sop.json", null, { folderId: getLibraryFolderForNewSop() });
+    initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop() });
     await saveCurrentProjectToLibrary({ reason: "新建SOP", silent: true });
   }
 
@@ -4582,7 +5329,8 @@
             {
               description: "SOP项目文件",
               accept: {
-                "application/json": [".json"]
+                "application/zip": [".sopzip"],
+                "application/json": [".sop.json", ".json"]
               }
             }
           ]
@@ -4613,10 +5361,9 @@
   }
 
   async function loadProjectFromFile(file, fileHandle) {
-    const rawText = await file.text();
-    const project = JSON.parse(rawText);
+    const project = await loadProjectDocumentFromFile(file);
     validateProjectFile(project);
-    await applyProject(project, file.name || "未命名.sop.json", fileHandle);
+    await applyProject(project, file.name || "未命名.sopzip", isSopPackageFileName(file.name) ? fileHandle : null);
     await saveCurrentProjectToLibrary({ reason: "导入到SOP库", silent: true, skipVersion: true });
   }
 
@@ -4655,7 +5402,7 @@
             {
               description: "SOP项目文件",
               accept: {
-                "application/json": [".json"]
+                "application/zip": [".sopzip"]
               }
             }
           ]
@@ -4668,7 +5415,7 @@
         return;
       }
 
-      downloadProjectFile(project, suggestedName);
+      await downloadProjectFile(project, suggestedName);
       markClean();
       await saveCurrentProjectToLibrary({ silent: true, skipVersion: true });
     } catch (error) {
@@ -4678,13 +5425,14 @@
   }
 
   async function writeProjectToHandle(handle, project) {
+    const blob = await createSopPackageBlob(project);
     const writable = await handle.createWritable();
-    await writable.write(JSON.stringify(project, null, 2));
+    await writable.write(blob);
     await writable.close();
   }
 
-  function downloadProjectFile(project, fileName) {
-    const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
+  async function downloadProjectFile(project, fileName) {
+    const blob = await createSopPackageBlob(project);
     downloadBlob(blob, fileName);
   }
 
@@ -4716,6 +5464,7 @@
       appVersion: APP_VERSION,
       schemaVersion: SOP_SCHEMA_VERSION,
       reason,
+      globalInfo: normalizeGlobalInfo(projectState.globalInfo),
       pages: serializePages()
     };
 
@@ -4738,9 +5487,11 @@
     if (!window.confirm(message)) return;
 
     createVersionSnapshot(`回滚前备份，目标 V${snapshot.version}`);
+    projectState.globalInfo = normalizeGlobalInfo(snapshot.globalInfo);
     await applyPages(snapshot.pages);
     projectState.currentVersion = snapshot.version;
     projectState.dirty = true;
+    updateGlobalInfoControls(projectState.globalInfo);
     updateProjectUi();
   }
 
@@ -4755,8 +5506,10 @@
         fileName: projectState.fileName,
         folderId: projectState.folderId || DEFAULT_FOLDER_ID,
         currentVersion: projectState.currentVersion,
-        lastVersion: projectState.lastVersion
+        lastVersion: projectState.lastVersion,
+        globalInfo: normalizeGlobalInfo(projectState.globalInfo)
       },
+      assets: normalizeAssetRecords(projectState.assets),
       pages: serializePages(),
       history: options.includeHistory ? cloneHistory(projectState.history) : []
     };
@@ -4764,7 +5517,10 @@
 
   function serializePages() {
     return getPages().map((page) => {
-      return {
+      if (isFreeStepPage(page)) {
+        syncFreeStepCardsFromDom(page);
+      }
+      const pageData = {
         pageNumber: Number(page.dataset.pageNumber) || 0,
         stepTemplateCount: getPageStepTemplateCount(page),
         textCells: getEditableTextCells(page).map(serializeTextCell),
@@ -4772,7 +5528,21 @@
         globalAnnotations: (page._globalAnnotationModels || []).map(cloneModel),
         globalTexts: (page._globalTextModels || []).map(cloneModel)
       };
+      if (isFreeStepPage(page)) {
+        pageData.stepCards = serializeFreeStepCards(page);
+      }
+      return pageData;
     });
+  }
+
+  function serializeFreeStepCards(page) {
+    return getFreeStepCards(page).map((card) => ({
+      id: card.id,
+      size: normalizeFreeStepCardSize(card.size),
+      imageSlot: card.imageSlot ? structuredCloneSafe(card.imageSlot) : null,
+      descCell: card.descCell ? structuredCloneSafe(card.descCell) : null,
+      noteCell: card.noteCell ? structuredCloneSafe(card.noteCell) : null
+    }));
   }
 
   function serializeTextCell(cell) {
@@ -4796,7 +5566,7 @@
       mediaKind: slot.dataset.mediaKind || "empty",
       fit: slot.dataset.fit || "cover",
       logo: isLogoSlot(slot),
-      imageSrc: slot.dataset.mediaKind === "image" && img ? img.getAttribute("src") || "" : "",
+      assetId: slot.dataset.assetId || null,
       imageState: {
         naturalWidth: state.naturalWidth || 0,
         naturalHeight: state.naturalHeight || 0,
@@ -4815,9 +5585,11 @@
       closeImageEditor();
     }
 
+    projectState.globalInfo = normalizeGlobalInfo(project.document && project.document.globalInfo);
+    projectState.assets = normalizeAssetRecords(project.assets || {});
     await applyPages(project.pages || []);
     projectState.documentId = project.document && project.document.id ? project.document.id : createId("doc");
-    projectState.fileName = fileName || (project.document && project.document.fileName) || "未命名.sop.json";
+    projectState.fileName = fileName || (project.document && project.document.fileName) || "未命名.sopzip";
     projectState.fileHandle = fileHandle || null;
     projectState.folderId = project.document && project.document.folderId ? project.document.folderId : DEFAULT_FOLDER_ID;
     projectState.libraryFileId = "";
@@ -4835,6 +5607,7 @@
     if (!projectState.history.length) {
       createVersionSnapshot("导入版本", { keepClean: true });
     }
+    updateGlobalInfoControls(projectState.globalInfo);
     markClean();
   }
 
@@ -4847,7 +5620,8 @@
       const safePages = Array.isArray(pagesData) && pagesData.length ? pagesData : [{}];
       for (const pageData of safePages) {
         const page = buildPage(nextPageId++, {
-          stepTemplateCount: getPageDataStepTemplateCount(pageData)
+          stepTemplateCount: getPageDataStepTemplateCount(pageData),
+          stepCards: pageData && pageData.stepCards
         });
         pagesEl.appendChild(page);
         await applyPageData(page, pageData);
@@ -4888,6 +5662,11 @@
       }
     }
 
+    if (isFreeStepPage(page) && Array.isArray(pageData.stepCards)) {
+      page._stepCards = normalizeFreeStepCards(pageData.stepCards);
+      await applyFreeStepCardModels(page);
+    }
+
     renderGlobalPageOverlays(page);
   }
 
@@ -4905,6 +5684,11 @@
       slot.dataset.hasImage = "true";
       slot.dataset.mediaKind = "source";
       renderSlotOverlays(slot);
+      return;
+    }
+
+    if (savedSlot.assetId) {
+      await applyAssetImageToSlot(slot, savedSlot);
       return;
     }
 
@@ -4945,9 +5729,70 @@
     renderSlotOverlays(slot);
   }
 
+  async function applyAssetImageToSlot(slot, savedSlot) {
+    const assetId = savedSlot.assetId;
+    const img = slot.querySelector("img");
+    const savedState = savedSlot.imageState || {};
+    slot.dataset.assetId = assetId || "";
+
+    const blob = await getAssetBlob(assetId);
+    if (!blob || !img) {
+      Object.assign(slot._imageState, {
+        naturalWidth: savedState.naturalWidth || 0,
+        naturalHeight: savedState.naturalHeight || 0,
+        scale: savedState.scale || 1,
+        x: savedState.x || 0,
+        y: savedState.y || 0,
+        dragging: false,
+        startX: 0,
+        startY: 0,
+        originX: 0,
+        originY: 0,
+        objectUrl: ""
+      });
+      slot.dataset.hasImage = "true";
+      slot.dataset.mediaKind = "missing";
+      slot.classList.add("is-missing-asset");
+      renderSlotOverlays(slot);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    slot._imageState.objectUrl = objectUrl;
+    img.src = objectUrl;
+    await waitImageReady(img);
+    await nextFrame();
+    await nextFrame();
+
+    Object.assign(slot._imageState, {
+      naturalWidth: img.naturalWidth || savedState.naturalWidth || 0,
+      naturalHeight: img.naturalHeight || savedState.naturalHeight || 0,
+      scale: savedState.scale || 1,
+      x: savedState.x || 0,
+      y: savedState.y || 0,
+      dragging: false,
+      startX: 0,
+      startY: 0,
+      originX: 0,
+      originY: 0,
+      objectUrl
+    });
+    slot.dataset.hasImage = "true";
+    slot.dataset.mediaKind = "image";
+    slot.classList.remove("is-missing-asset");
+
+    if (!savedSlot.imageState || shouldResetSavedImagePlacement(slot, savedSlot)) {
+      resetImageCover(slot);
+    } else {
+      clampImage(slot);
+      renderSlotImage(slot);
+    }
+    renderSlotOverlays(slot);
+  }
+
   function validateProjectFile(project) {
     if (!project || project.fileType !== SOP_FILE_TYPE) {
-      throw new Error("这不是可编辑的 SOP 项目文件。请打开通过“保存SOP/另存为”导出的 .sop.json 文件。");
+      throw new Error("这不是可编辑的 SOP 项目文件。请打开通过“保存SOP/另存为”导出的 .sopzip 项目包。");
     }
     if (Number(project.schemaVersion) > SOP_SCHEMA_VERSION) {
       throw new Error("这个 SOP 文件来自更新版本的编辑器，当前版本无法安全打开。");
@@ -5061,9 +5906,586 @@
     window.alert(`${title}：${message}`);
   }
 
+  function normalizeAssetRecords(records) {
+    const source = records && typeof records === "object" ? records : {};
+    return Object.fromEntries(Object.entries(source).map(([key, record]) => {
+      const id = record && record.id ? String(record.id) : String(key || "");
+      if (!id) return null;
+      const mime = normalizeAssetMime(record.mime) || "image/png";
+      const hash = String(record.hash || id.replace(/^asset_/, ""));
+      const prefix = hash.slice(0, 12) || id.replace(/^asset_/, "") || Date.now().toString(16);
+      return [id, {
+        id,
+        kind: "image",
+        mime,
+        path: normalizePackageAssetPath(record.path || `assets/img_${prefix}${getImageAssetExtension(mime)}`),
+        thumbnailPath: normalizePackageAssetPath(record.thumbnailPath || `thumbnails/thumb_${prefix}.webp`),
+        width: Number(record.width) || 0,
+        height: Number(record.height) || 0,
+        byteSize: Number(record.byteSize) || 0,
+        hash,
+        source: record.source === "clipboard" ? "clipboard" : "file",
+        createdAt: record.createdAt || new Date().toISOString()
+      }];
+    }).filter(Boolean));
+  }
+
+  function normalizeAssetMime(mime) {
+    const value = String(mime || "").toLowerCase();
+    if (value === "image/jpg") return "image/jpeg";
+    return ALLOWED_ASSET_IMAGE_MIMES.has(value) ? value : "";
+  }
+
+  async function createImageAssetFromBlob(projectId, blob, source, options = {}) {
+    if (!blob) throw new Error("图片数据为空。");
+    const mime = normalizeAssetMime(blob.type || getImageMimeType(options.fileName || ""));
+    if (!ALLOWED_ASSET_IMAGE_MIMES.has(mime)) {
+      throw new Error("当前项目包只支持 PNG、JPG、WebP 图片资源。");
+    }
+    if (blob.size > MAX_IMAGE_ASSET_BYTES) {
+      throw new Error("单张图片超过 10 MB，请压缩后重新插入。");
+    }
+    if (!projectState.documentId) {
+      projectState.documentId = projectId || createId("doc");
+    }
+
+    const normalizedBlob = blob.type === mime ? blob : new Blob([blob], { type: mime });
+    const hash = await hashBlob(normalizedBlob);
+    const existing = findAssetByHash(hash);
+    if (existing) {
+      await storeAssetBlob(existing, normalizedBlob, await getAssetThumbnailBlob(existing.id));
+      return existing;
+    }
+
+    const prefix = getUniqueAssetHashPrefix(hash);
+    const id = `asset_${prefix}`;
+    const dimensions = await getBlobImageSize(normalizedBlob);
+    const thumbnailBlob = await createThumbnailBlob(normalizedBlob).catch(() => null);
+    const record = {
+      id,
+      kind: "image",
+      mime,
+      path: `assets/img_${prefix}${getImageAssetExtension(mime)}`,
+      thumbnailPath: `thumbnails/thumb_${prefix}.webp`,
+      width: dimensions.width,
+      height: dimensions.height,
+      byteSize: normalizedBlob.size,
+      hash,
+      source: source === "clipboard" ? "clipboard" : "file",
+      createdAt: new Date().toISOString()
+    };
+
+    projectState.assets = normalizeAssetRecords({
+      ...projectState.assets,
+      [id]: record
+    });
+    await storeAssetBlob(record, normalizedBlob, thumbnailBlob);
+    return projectState.assets[id];
+  }
+
+  function findAssetByHash(hash) {
+    return Object.values(projectState.assets || {}).find((record) => record.hash === hash) || null;
+  }
+
+  function getUniqueAssetHashPrefix(hash) {
+    for (let length = 12; length <= Math.min(32, hash.length); length += 4) {
+      const prefix = hash.slice(0, length);
+      if (!projectState.assets[`asset_${prefix}`]) return prefix;
+    }
+    return `${hash.slice(0, 12)}_${Date.now().toString(16)}`;
+  }
+
+  async function hashBlob(blob) {
+    const buffer = await blob.arrayBuffer();
+    const digest = await window.crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function getBlobImageSize(blob) {
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      img.decoding = "async";
+      const loaded = new Promise((resolve, reject) => {
+        img.onload = () => resolve({
+          width: img.naturalWidth || 0,
+          height: img.naturalHeight || 0
+        });
+        img.onerror = () => reject(new Error("图片读取失败，请重新复制后粘贴。"));
+      });
+      img.src = url;
+      return await loaded;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function createThumbnailBlob(blob) {
+    const image = await loadImageElementFromBlob(blob);
+    const maxSize = 360;
+    const ratio = Math.min(1, maxSize / Math.max(image.naturalWidth || 1, image.naturalHeight || 1));
+    const width = Math.max(1, Math.round((image.naturalWidth || 1) * ratio));
+    const height = Math.max(1, Math.round((image.naturalHeight || 1) * ratio));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(image, 0, 0, width, height);
+    return new Promise((resolve) => {
+      canvas.toBlob((result) => resolve(result || blob), "image/webp", 0.82);
+    });
+  }
+
+  function loadImageElementFromBlob(blob) {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.decoding = "async";
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        URL.revokeObjectURL(url);
+        img.onload = null;
+        img.onerror = null;
+      };
+      img.onload = () => {
+        cleanup();
+        resolve(img);
+      };
+      img.onerror = () => {
+        cleanup();
+        reject(new Error("图片读取失败，请重新复制后粘贴。"));
+      };
+      img.src = url;
+    });
+  }
+
+  async function imageSourceToBlob(src) {
+    const value = String(src || "");
+    if (/^data:image\//i.test(value)) {
+      return dataUrlToBlob(value);
+    }
+    const response = await fetch(value);
+    if (!response.ok) {
+      throw new Error("图片读取失败，请重新复制后粘贴。");
+    }
+    return response.blob();
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    const match = String(dataUrl || "").match(/^data:([^;,]+)(;base64)?,(.*)$/i);
+    if (!match) throw new Error("图片读取失败，请重新复制后粘贴。");
+    const mime = normalizeAssetMime(match[1]);
+    if (!mime) throw new Error("当前项目包只支持 PNG、JPG、WebP 图片资源。");
+    const data = match[2] ? window.atob(match[3]) : decodeURIComponent(match[3]);
+    const bytes = new Uint8Array(data.length);
+    for (let index = 0; index < data.length; index += 1) {
+      bytes[index] = data.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mime });
+  }
+
+  async function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error || new Error("图片读取失败。"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function getImageAssetExtension(mime) {
+    if (mime === "image/jpeg") return ".jpg";
+    if (mime === "image/webp") return ".webp";
+    return ".png";
+  }
+
+  function assetStoreKey(projectId, assetId) {
+    return `${projectId || projectState.documentId || "doc"}::${assetId}`;
+  }
+
+  async function ensureAssetDbReady() {
+    if (!window.indexedDB) {
+      throw new Error("当前浏览器不支持 IndexedDB，无法保存图片资源。");
+    }
+    if (libraryState.db) return libraryState.db;
+    if (!assetRuntime.dbPromise) {
+      assetRuntime.dbPromise = openLibraryDb().then((db) => {
+        libraryState.db = db;
+        return db;
+      }).finally(() => {
+        assetRuntime.dbPromise = null;
+      });
+    }
+    return assetRuntime.dbPromise;
+  }
+
+  async function storeAssetBlob(record, blob, thumbnailBlob) {
+    if (!record || !record.id || !blob) return;
+    await ensureAssetDbReady();
+    const projectId = projectState.documentId;
+    const key = assetStoreKey(projectId, record.id);
+    assetRuntime.blobs.set(key, blob);
+    await idbPut("assets", {
+      key,
+      projectId,
+      assetId: record.id,
+      record,
+      blob,
+      updatedAt: new Date().toISOString()
+    });
+    if (thumbnailBlob) {
+      assetRuntime.thumbnails.set(key, thumbnailBlob);
+      await idbPut("thumbnails", {
+        key,
+        projectId,
+        assetId: record.id,
+        blob: thumbnailBlob,
+        mime: thumbnailBlob.type || "image/webp",
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  async function getAssetBlob(assetId, projectId = projectState.documentId) {
+    if (!assetId) return null;
+    const key = assetStoreKey(projectId, assetId);
+    if (assetRuntime.blobs.has(key)) {
+      return assetRuntime.blobs.get(key);
+    }
+    if (!window.indexedDB) return null;
+    await ensureAssetDbReady();
+    const record = await idbGet("assets", key).catch(() => null);
+    if (record && record.blob) {
+      assetRuntime.blobs.set(key, record.blob);
+      return record.blob;
+    }
+    return null;
+  }
+
+  async function getAssetThumbnailBlob(assetId, projectId = projectState.documentId) {
+    if (!assetId) return null;
+    const key = assetStoreKey(projectId, assetId);
+    if (assetRuntime.thumbnails.has(key)) {
+      return assetRuntime.thumbnails.get(key);
+    }
+    if (!window.indexedDB) return null;
+    await ensureAssetDbReady();
+    const record = await idbGet("thumbnails", key).catch(() => null);
+    if (record && record.blob) {
+      assetRuntime.thumbnails.set(key, record.blob);
+      return record.blob;
+    }
+    return null;
+  }
+
+  async function createObjectUrlForAsset(assetId) {
+    const blob = await getAssetBlob(assetId);
+    if (!blob) throw new Error(`图片资源缺失：${assetId}`);
+    return URL.createObjectURL(blob);
+  }
+
+  async function deleteStoredAsset(projectId, assetId) {
+    const key = assetStoreKey(projectId, assetId);
+    assetRuntime.blobs.delete(key);
+    assetRuntime.thumbnails.delete(key);
+    if (!window.indexedDB) return;
+    await ensureAssetDbReady();
+    await idbDelete("assets", key).catch(() => {});
+    await idbDelete("thumbnails", key).catch(() => {});
+  }
+
+  function collectReferencedAssetIds(project) {
+    const refs = new Set();
+    walkProjectNodes(project, (value) => {
+      if (!value || typeof value !== "object") return;
+      if (value.assetId) refs.add(String(value.assetId));
+    });
+    return refs;
+  }
+
+  function walkProjectNodes(value, visitor) {
+    visitor(value);
+    if (Array.isArray(value)) {
+      value.forEach((item) => walkProjectNodes(item, visitor));
+      return;
+    }
+    if (value && typeof value === "object") {
+      Object.values(value).forEach((item) => walkProjectNodes(item, visitor));
+    }
+  }
+
+  async function cleanupUnusedAssets(project) {
+    const documentId = project && project.document && project.document.id ? project.document.id : projectState.documentId;
+    const refs = collectReferencedAssetIds(project);
+    const assets = normalizeAssetRecords(project.assets || {});
+    for (const assetId of Object.keys(assets)) {
+      if (refs.has(assetId)) continue;
+      delete assets[assetId];
+      await deleteStoredAsset(documentId, assetId);
+    }
+    project.assets = assets;
+    if (documentId === projectState.documentId) {
+      projectState.assets = assets;
+    }
+  }
+
+  async function createSopPackageBlob(projectInput) {
+    if (!window.JSZip) {
+      throw new Error("SOP 项目包导出依赖 JSZip 未加载，请刷新页面后重试。");
+    }
+    const project = sanitizeProjectForPackage(projectInput);
+    await cleanupUnusedAssets(project);
+    await validateSopDocumentForPackage(project);
+
+    const zip = new JSZip();
+    const manifest = createSopPackageManifest(project);
+    zip.file(SOP_PACKAGE_DOCUMENT_PATH, JSON.stringify(project, null, 2));
+    zip.file(SOP_PACKAGE_MANIFEST_PATH, JSON.stringify(manifest, null, 2));
+
+    const assets = normalizeAssetRecords(project.assets || {});
+    for (const record of Object.values(assets)) {
+      const blob = await getAssetBlob(record.id, project.document && project.document.id);
+      if (!blob) {
+        throw new Error(`导出失败：部分图片资源缺失，请重新插入或恢复资源后再导出。缺失 ${record.id}`);
+      }
+      zip.file(record.path, blob);
+      const thumbnail = await getAssetThumbnailBlob(record.id, project.document && project.document.id);
+      if (thumbnail) {
+        zip.file(record.thumbnailPath, thumbnail);
+      }
+    }
+
+    return zip.generateAsync({
+      type: "blob",
+      mimeType: "application/zip",
+      compression: "DEFLATE"
+    });
+  }
+
+  function sanitizeProjectForPackage(projectInput) {
+    const project = structuredCloneSafe(projectInput || {});
+    project.fileType = SOP_FILE_TYPE;
+    project.schemaVersion = SOP_SCHEMA_VERSION;
+    project.appVersion = APP_VERSION;
+    project.savedAt = new Date().toISOString();
+    project.document = {
+      ...(project.document || {}),
+      id: project.document && project.document.id ? project.document.id : projectState.documentId || createId("doc"),
+      fileName: normalizeProjectFileName(project.document && project.document.fileName || projectState.fileName),
+      folderId: project.document && project.document.folderId ? project.document.folderId : projectState.folderId || DEFAULT_FOLDER_ID
+    };
+    project.assets = normalizeAssetRecords(project.assets || {});
+    stripEmbeddedImageSources(project);
+    return project;
+  }
+
+  function stripEmbeddedImageSources(value) {
+    if (Array.isArray(value)) {
+      value.forEach(stripEmbeddedImageSources);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    if (Object.prototype.hasOwnProperty.call(value, "imageSrc")) {
+      delete value.imageSrc;
+    }
+    Object.values(value).forEach(stripEmbeddedImageSources);
+  }
+
+  function createSopPackageManifest(project) {
+    const assets = normalizeAssetRecords(project.assets || {});
+    return {
+      fileType: SOP_PACKAGE_FILE_TYPE,
+      packageVersion: SOP_PACKAGE_VERSION,
+      documentPath: SOP_PACKAGE_DOCUMENT_PATH,
+      schemaVersion: Number(project.schemaVersion) || SOP_SCHEMA_VERSION,
+      appVersion: APP_VERSION,
+      createdAt: new Date().toISOString(),
+      assetCount: Object.keys(assets).length,
+      thumbnailCount: Object.values(assets).filter((record) => record.thumbnailPath).length
+    };
+  }
+
+  async function validateSopDocumentForPackage(project) {
+    assertNoEmbeddedBase64(project);
+    const assets = normalizeAssetRecords(project.assets || {});
+    Object.values(assets).forEach((record) => {
+      if (!isSafePackagePath(record.path) || !record.path.startsWith("assets/")) {
+        throw new Error(`导出失败：图片资源路径不安全：${record.path}`);
+      }
+      if (record.thumbnailPath && (!isSafePackagePath(record.thumbnailPath) || !record.thumbnailPath.startsWith("thumbnails/"))) {
+        throw new Error(`导出失败：缩略图路径不安全：${record.thumbnailPath}`);
+      }
+    });
+    const missing = [];
+    walkProjectNodes(project, (value) => {
+      if (!value || typeof value !== "object") return;
+      if (value.mediaKind === "image" && value.hasImage === true && !value.assetId) {
+        missing.push("未绑定资源的图片槽");
+      }
+      if (value.assetId && !assets[value.assetId]) {
+        missing.push(String(value.assetId));
+      }
+    });
+    if (missing.length) {
+      throw new Error(`导出失败：部分图片资源缺失，请重新插入或恢复资源后再导出。${Array.from(new Set(missing)).join(", ")}`);
+    }
+  }
+
+  function assertNoEmbeddedBase64(project) {
+    const text = JSON.stringify(project || {});
+    if (/data:image\/|;base64,/i.test(text)) {
+      throw new Error("导出失败：document.json 中仍包含 Base64 图片数据。");
+    }
+  }
+
+  async function importSopPackageFromFile(file) {
+    if (!window.JSZip) {
+      throw new Error("SOP 项目包导入依赖 JSZip 未加载，请刷新页面后重试。");
+    }
+    const zip = await window.JSZip.loadAsync(await file.arrayBuffer());
+    validatePackageZipPaths(zip);
+    const manifest = await readPackageJson(zip, SOP_PACKAGE_MANIFEST_PATH);
+    if (!manifest || manifest.fileType !== SOP_PACKAGE_FILE_TYPE) {
+      throw new Error("这不是有效的 .sopzip 项目包。");
+    }
+    const project = await readPackageJson(zip, manifest.documentPath || SOP_PACKAGE_DOCUMENT_PATH);
+    validateProjectFile(project);
+    project.assets = normalizeAssetRecords(project.assets || {});
+    const documentId = project.document && project.document.id ? project.document.id : createId("doc");
+    if (!project.document) project.document = {};
+    project.document.id = documentId;
+    project.document.fileName = file.name || project.document.fileName || "未命名.sopzip";
+
+    const missing = [];
+    for (const record of Object.values(project.assets)) {
+      const zipFile = zip.file(record.path);
+      if (!zipFile) {
+        missing.push(record.id);
+        continue;
+      }
+      const blob = await getBlobFromZipFile(zipFile, record.mime);
+      let thumbnail = null;
+      const thumbFile = record.thumbnailPath ? zip.file(record.thumbnailPath) : null;
+      if (thumbFile) {
+        thumbnail = await getBlobFromZipFile(thumbFile, "image/webp");
+      }
+      await storeImportedAssetBlob(documentId, record, blob, thumbnail);
+    }
+    if (missing.length) {
+      window.setTimeout(() => {
+        window.alert(`图片资源缺失：${missing.join(", ")}`);
+      }, 0);
+    }
+    return project;
+  }
+
+  async function storeImportedAssetBlob(projectId, record, blob, thumbnailBlob) {
+    await ensureAssetDbReady();
+    const key = assetStoreKey(projectId, record.id);
+    assetRuntime.blobs.set(key, blob);
+    await idbPut("assets", {
+      key,
+      projectId,
+      assetId: record.id,
+      record,
+      blob,
+      updatedAt: new Date().toISOString()
+    });
+    if (thumbnailBlob) {
+      assetRuntime.thumbnails.set(key, thumbnailBlob);
+      await idbPut("thumbnails", {
+        key,
+        projectId,
+        assetId: record.id,
+        blob: thumbnailBlob,
+        mime: thumbnailBlob.type || "image/webp",
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  function validatePackageZipPaths(zip) {
+    Object.keys(zip.files || {}).forEach((path) => {
+      if (!isSafePackagePath(path)) {
+        throw new Error(`SOP 项目包包含不安全路径：${path}`);
+      }
+    });
+  }
+
+  function isSafePackagePath(path) {
+    const value = String(path || "").replace(/\\/g, "/");
+    if (!value || value.startsWith("/") || /^[A-Za-z]:/.test(value) || value.includes("../")) return false;
+    return value === SOP_PACKAGE_DOCUMENT_PATH ||
+      value === SOP_PACKAGE_MANIFEST_PATH ||
+      value.startsWith("assets/") ||
+      value.startsWith("thumbnails/");
+  }
+
+  async function readPackageJson(zip, path) {
+    const safePath = normalizePackageAssetPath(path);
+    const file = safePath ? zip.file(safePath) : null;
+    if (!file) throw new Error(`SOP 项目包缺少 ${safePath || path}`);
+    return JSON.parse(await file.async("text"));
+  }
+
+  async function getBlobFromZipFile(zipFile, mime) {
+    const blob = await zipFile.async("blob");
+    return blob.type === mime ? blob : new Blob([blob], { type: mime || blob.type || "application/octet-stream" });
+  }
+
+  function normalizePackageAssetPath(path) {
+    return String(path || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  }
+
+  async function loadProjectDocumentFromFile(file) {
+    if (isSopPackageFileName(file.name)) {
+      return importSopPackageFromFile(file);
+    }
+    if (isLegacyProjectFileName(file.name)) {
+      return parseLegacyProjectJsonFile(file);
+    }
+    throw new Error("请打开 .sopzip 项目包。旧版 .sop.json 暂不支持图片迁移。");
+  }
+
+  async function parseLegacyProjectJsonFile(file) {
+    const rawText = await file.text();
+    if (containsEmbeddedBase64(rawText)) {
+      throw new Error("当前版本主要支持 .sopzip 项目包。旧版 .sop.json 暂不支持图片迁移。");
+    }
+    const project = JSON.parse(rawText);
+    validateProjectFile(project);
+    project.assets = normalizeAssetRecords(project.assets || {});
+    return project;
+  }
+
+  function containsEmbeddedBase64(value) {
+    return /data:image\/|;base64,/i.test(String(value || ""));
+  }
+
+  async function hydrateProjectImageSourcesForExport(projectInput) {
+    const project = structuredCloneSafe(projectInput || {});
+    const projectId = project.document && project.document.id ? project.document.id : projectState.documentId;
+    const applySource = async (slot) => {
+      if (!slot || typeof slot !== "object" || slot.mediaKind !== "image" || !slot.assetId || slot.imageSrc) return;
+      const blob = await getAssetBlob(slot.assetId, projectId);
+      if (blob) {
+        slot.imageSrc = await blobToDataUrl(blob);
+      }
+    };
+    const tasks = [];
+    walkProjectNodes(project, (value) => {
+      if (value && typeof value === "object" && value.assetId) {
+        tasks.push(applySource(value));
+      }
+    });
+    await Promise.all(tasks);
+    return project;
+  }
+
   function normalizeProjectFileName(fileName) {
-    const baseName = String(fileName || "未命名.sop.json").trim() || "未命名.sop.json";
-    return baseName.endsWith(".sop.json") ? baseName : baseName.replace(/\.json$/i, "") + ".sop.json";
+    const baseName = String(fileName || "未命名.sopzip").trim() || "未命名.sopzip";
+    return baseName.endsWith(SOP_PACKAGE_EXTENSION) ?
+      baseName :
+      removeProjectExtension(baseName) + SOP_PACKAGE_EXTENSION;
   }
 
   function cloneHistory(history) {
@@ -5075,6 +6497,7 @@
         appVersion: snapshot.appVersion || APP_VERSION,
         schemaVersion: Number(snapshot.schemaVersion) || SOP_SCHEMA_VERSION,
         reason: snapshot.reason || "版本",
+        globalInfo: normalizeGlobalInfo(snapshot.globalInfo),
         pages: Array.isArray(snapshot.pages) ? structuredCloneSafe(snapshot.pages) : []
       };
     }).filter((snapshot) => snapshot.version > 0);
@@ -5219,6 +6642,16 @@
         if (!db.objectStoreNames.contains("bomHistory")) {
           const bomHistory = db.createObjectStore("bomHistory", { keyPath: "id" });
           bomHistory.createIndex("loadedAt", "loadedAt", { unique: false });
+        }
+        if (!db.objectStoreNames.contains("assets")) {
+          const assets = db.createObjectStore("assets", { keyPath: "key" });
+          assets.createIndex("projectId", "projectId", { unique: false });
+          assets.createIndex("assetId", "assetId", { unique: false });
+        }
+        if (!db.objectStoreNames.contains("thumbnails")) {
+          const thumbnails = db.createObjectStore("thumbnails", { keyPath: "key" });
+          thumbnails.createIndex("projectId", "projectId", { unique: false });
+          thumbnails.createIndex("assetId", "assetId", { unique: false });
         }
       };
 
@@ -5374,8 +6807,7 @@
   async function readLibraryDocument(fileHandle, folderHandle, folderId, folderPath, fileName) {
     try {
       const file = await fileHandle.getFile();
-      const text = await file.text();
-      const project = JSON.parse(text);
+      const project = await loadProjectDocumentFromFile(file);
       validateProjectFile(project);
       return {
         id: createLibraryFileId(folderId, fileName),
@@ -5798,7 +7230,7 @@
     if (!hasLibraryConnection()) {
       const empty = document.createElement("div");
       empty.className = "library-empty";
-      empty.textContent = "连接电脑文件夹或飞书云盘后，这里会显示其中的 .sop.json 文件。";
+      empty.textContent = "连接电脑文件夹或飞书云盘后，这里会显示其中的 .sopzip 文件。";
       sopLibraryListEl.appendChild(empty);
       return;
     }
@@ -6113,15 +7545,118 @@
       addPageTemplateMenu.appendChild(button);
     });
 
+    const blankCardButton = document.createElement("button");
+    blankCardButton.type = "button";
+    blankCardButton.className = "add-page-template-option";
+    blankCardButton.setAttribute("role", "menuitem");
+    blankCardButton.dataset.stepTemplateCount = String(FREE_STEP_TEMPLATE_COUNT);
+    blankCardButton.dataset.blankStepCards = "true";
+    blankCardButton.textContent = "空白卡片模板";
+    blankCardButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      addPage({
+        scrollIntoView: true,
+        stepTemplateCount: FREE_STEP_TEMPLATE_COUNT,
+        stepCards: []
+      });
+      addPageTemplateMenu.classList.remove("is-open");
+    });
+    addPageTemplateMenu.appendChild(blankCardButton);
+
     wrapper.appendChild(addPageTemplateMenu);
-    wrapper.addEventListener("mouseenter", () => addPageTemplateMenu.classList.add("is-open"));
-    wrapper.addEventListener("mouseleave", () => addPageTemplateMenu.classList.remove("is-open"));
-    wrapper.addEventListener("focusin", () => addPageTemplateMenu.classList.add("is-open"));
+    bindHoverMenu(wrapper, addPageTemplateMenu);
+  }
+
+  function buildAddStepCardMenu() {
+    if (!addPageButton || document.getElementById("add-step-card") || document.getElementById("add-step-card-menu")) return;
+
+    const pageControl = addPageButton.closest(".add-page-control") || addPageButton;
+    const wrapper = document.createElement("div");
+    wrapper.className = "add-page-control add-step-card-control";
+    pageControl.parentNode.insertBefore(wrapper, pageControl.nextSibling);
+
+    addStepCardButton = document.createElement("button");
+    addStepCardButton.type = "button";
+    addStepCardButton.className = "toolbar-button";
+    addStepCardButton.id = "add-step-card";
+    addStepCardButton.innerHTML = `<span class="button-icon">C</span><span>新增卡片</span>`;
+    addStepCardButton.addEventListener("click", async () => {
+      await addFreeStepCardToCurrentPage("small");
+    });
+    wrapper.appendChild(addStepCardButton);
+
+    addStepCardMenu = document.createElement("div");
+    addStepCardMenu.className = "add-page-template-menu add-step-card-menu";
+    addStepCardMenu.id = "add-step-card-menu";
+    addStepCardMenu.setAttribute("role", "menu");
+    addStepCardMenu.setAttribute("aria-label", "选择新增步骤卡片尺寸");
+
+    FREE_STEP_CARD_SIZE_OPTIONS.forEach((option) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "add-page-template-option";
+      button.setAttribute("role", "menuitem");
+      button.dataset.stepCardSize = option.size;
+      button.textContent = option.label;
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        await addFreeStepCardToCurrentPage(option.size);
+        addStepCardMenu.classList.remove("is-open");
+      });
+      addStepCardMenu.appendChild(button);
+    });
+
+    wrapper.appendChild(addStepCardMenu);
+    bindHoverMenu(wrapper, addStepCardMenu, {
+      canOpen: () => !addStepCardButton.disabled
+    });
+    updateAddStepCardControl();
+  }
+
+  function bindHoverMenu(wrapper, menu, options = {}) {
+    let closeTimer = 0;
+    const canOpen = typeof options.canOpen === "function" ? options.canOpen : () => true;
+    const clearCloseTimer = () => {
+      if (!closeTimer) return;
+      window.clearTimeout(closeTimer);
+      closeTimer = 0;
+    };
+    const openMenu = () => {
+      clearCloseTimer();
+      if (canOpen()) {
+        menu.classList.add("is-open");
+      }
+    };
+    const closeMenuSoon = () => {
+      clearCloseTimer();
+      closeTimer = window.setTimeout(() => {
+        menu.classList.remove("is-open");
+        closeTimer = 0;
+      }, 220);
+    };
+
+    wrapper.addEventListener("mouseenter", openMenu);
+    wrapper.addEventListener("mouseleave", closeMenuSoon);
+    menu.addEventListener("mouseenter", openMenu);
+    menu.addEventListener("mouseleave", closeMenuSoon);
+    wrapper.addEventListener("focusin", openMenu);
     wrapper.addEventListener("focusout", (event) => {
       if (!wrapper.contains(event.relatedTarget)) {
-        addPageTemplateMenu.classList.remove("is-open");
+        closeMenuSoon();
       }
     });
+  }
+
+  function updateAddStepCardControl() {
+    if (!addStepCardButton) return;
+    const enabled = isFreeStepPage(getCurrentPage());
+    addStepCardButton.disabled = !enabled;
+    addStepCardButton.title = enabled ? "给当前 8 步骤页新增步骤卡片" : "只有 8 步骤模板支持新增步骤卡片";
+    if (!enabled && addStepCardMenu) {
+      addStepCardMenu.classList.remove("is-open");
+    }
   }
 
   function buildExportCollapsePanel() {
@@ -6254,6 +7789,68 @@
       node = node.previousElementSibling;
     }
     return node;
+  }
+
+  function buildGlobalInfoCollapsePanel() {
+    if (!globalInfoPanel || document.getElementById("global-info-panel-toggle")) return;
+
+    globalInfoPanel.classList.add("library-collapse-panel");
+    const title = globalInfoPanel.querySelector(".library-section-title");
+
+    globalInfoPanelToggle = document.createElement("button");
+    globalInfoPanelToggle.className = "library-collapse-toggle";
+    globalInfoPanelToggle.id = "global-info-panel-toggle";
+    globalInfoPanelToggle.type = "button";
+    globalInfoPanelToggle.setAttribute("aria-expanded", "true");
+    globalInfoPanelToggle.setAttribute("aria-controls", "global-info-panel-body");
+    globalInfoPanelToggle.innerHTML = `
+      <span>全局信息</span>
+      <span class="collapse-indicator" aria-hidden="true">&gt;</span>
+    `;
+
+    globalInfoPanelBody = document.createElement("div");
+    globalInfoPanelBody.className = "library-collapse-body global-info-body";
+    globalInfoPanelBody.id = "global-info-panel-body";
+
+    Array.from(globalInfoPanel.children).forEach((child) => {
+      if (child === title) return;
+      globalInfoPanelBody.appendChild(child);
+    });
+
+    if (title) {
+      title.replaceWith(globalInfoPanelToggle);
+    } else {
+      globalInfoPanel.prepend(globalInfoPanelToggle);
+    }
+    globalInfoPanel.appendChild(globalInfoPanelBody);
+  }
+
+  function initializeGlobalInfoPanelCollapse() {
+    let collapsed = false;
+    try {
+      const stored = window.localStorage.getItem(GLOBAL_INFO_PANEL_COLLAPSED_KEY);
+      if (stored !== null) {
+        collapsed = stored === "true";
+      }
+    } catch (_) {
+      collapsed = false;
+    }
+    setGlobalInfoPanelCollapsed(collapsed);
+  }
+
+  function setGlobalInfoPanelCollapsed(collapsed, options = {}) {
+    if (!globalInfoPanel || !globalInfoPanelBody || !globalInfoPanelToggle) return;
+    const nextCollapsed = Boolean(collapsed);
+    globalInfoPanel.classList.toggle("is-collapsed", nextCollapsed);
+    globalInfoPanelBody.hidden = nextCollapsed;
+    globalInfoPanelToggle.setAttribute("aria-expanded", String(!nextCollapsed));
+    if (options.persist) {
+      try {
+        window.localStorage.setItem(GLOBAL_INFO_PANEL_COLLAPSED_KEY, String(nextCollapsed));
+      } catch (_) {
+        // Ignore storage failures; the UI state still updates for this session.
+      }
+    }
   }
 
   function buildBomCollapsePanel() {
@@ -6845,7 +8442,7 @@
   async function runSelfTest() {
     try {
       document.body.dataset.selftestStep = "start";
-      const imageData = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+      const imageData = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
       const csv = [
         "物料编号,物料名称,规格数量,图片",
         `MAT-001,测试物料,2PCS,"${imageData}"`
@@ -6865,7 +8462,7 @@
       openBomPreview(bom);
       document.body.dataset.selftestStep = "bom-preview";
       const numberCell = document.querySelector(".text-cell[data-material-field='number'][data-material-index='0']");
-      applyBomItemToMaterial(numberCell, bom.items[0]);
+      await applyBomItemToMaterial(numberCell, bom.items[0]);
       document.body.dataset.selftestStep = "bom-applied";
       const page = numberCell.closest(".sop-page");
       const nameCell = page.querySelector(".text-cell[data-material-field='name'][data-material-index='0']");
@@ -6880,19 +8477,20 @@
       setMaterialFieldValue(nameCell, "name", "测试物料");
       setMaterialFieldValue(specCell, "spec", "");
       deleteImage(imageSlot, { keepFocus: false });
-      applyExactBomMatch(nameCell);
+      await applyBomItemToMaterial(nameCell, bom.items[0], { keepSearchOpen: true });
       const matchedImg = imageSlot.querySelector("img");
       await waitImageReady(matchedImg);
       await nextFrame();
       document.body.dataset.selftestStep = "bom-match";
 
       const stepPage = getPages()[0];
-      const sourceStepImage = getPageCellByKey(stepPage, "c5r2");
-      const sourceStepDesc = getPageCellByKey(stepPage, "c5r11");
-      const sourceStepNote = getTextCellValueElement(getPageCellByKey(stepPage, "c5r13"), "value");
+      const sourceStep = getStepCardElements(stepPage, 0);
+      const sourceStepImage = sourceStep.image;
+      const sourceStepDesc = sourceStep.desc;
+      const sourceStepNote = getTextCellValueElement(sourceStep.note, "value");
       sourceStepDesc.textContent = "SELFTEST_STEP_SOURCE";
       sourceStepNote.textContent = "SELFTEST_NOTE_SOURCE";
-      loadImageSource(sourceStepImage, imageData);
+      await loadImageSource(sourceStepImage, imageData);
       await waitImageReady(sourceStepImage.querySelector("img"));
       await nextFrame();
 
@@ -6900,17 +8498,19 @@
       const copied = copySelectedStepCard();
       selectStepCard(stepPage, 1);
       const pasted = await pasteStepCardToSelection();
-      const pastedStepDesc = getPageCellByKey(stepPage, "c8r11");
-      const pastedStepNote = getTextCellValueElement(getPageCellByKey(stepPage, "c8r13"), "value");
-      const pastedStepImage = getPageCellByKey(stepPage, "c8r2");
+      const pastedStep = getStepCardElements(stepPage, 1);
+      const pastedStepDesc = pastedStep.desc;
+      const pastedStepNote = getTextCellValueElement(pastedStep.note, "value");
+      const pastedStepImage = pastedStep.image;
       const pasteStepPassed = pasted &&
         pastedStepDesc.textContent === "SELFTEST_STEP_SOURCE" &&
         pastedStepNote.textContent === "SELFTEST_NOTE_SOURCE" &&
         pastedStepImage.dataset.hasImage === "true";
       await moveStepCardWithinPage(stepPage, 1, 3);
-      const movedStepDesc = getPageCellByKey(stepPage, "c14r11");
-      const movedStepNote = getTextCellValueElement(getPageCellByKey(stepPage, "c14r13"), "value");
-      const movedStepImage = getPageCellByKey(stepPage, "c14r2");
+      const movedStep = getStepCardElements(stepPage, 3);
+      const movedStepDesc = movedStep.desc;
+      const movedStepNote = getTextCellValueElement(movedStep.note, "value");
+      const movedStepImage = movedStep.image;
       const stepCardPassed = copied &&
         pasteStepPassed &&
         movedStepDesc.textContent === "SELFTEST_STEP_SOURCE" &&
@@ -6925,7 +8525,7 @@
       setMaterialFieldValue(sourceMaterialName, "name", "SELFTEST_MATERIAL_NAME");
       setMaterialFieldValue(sourceMaterialNumber, "number", "SELFTEST-MAT-001");
       setMaterialFieldValue(sourceMaterialSpec, "spec", "SELFTEST_SPEC");
-      loadImageSource(sourceMaterialImage, imageData);
+      await loadImageSource(sourceMaterialImage, imageData);
       await waitImageReady(sourceMaterialImage.querySelector("img"));
       await nextFrame();
       document.body.dataset.selftestStep = "material-source";
@@ -6956,16 +8556,62 @@
         movedMaterialImage.dataset.hasImage === "true";
       document.body.dataset.selftestStep = "material-card";
 
+      const logoSlot = getGlobalInfoLogoSlotFromPage(stepPage);
+      await loadImageSource(logoSlot, imageData);
+      await waitImageReady(logoSlot.querySelector("img"));
+      await nextFrame();
+      const globalInfoWithLogo = getGlobalInfoFromPage(stepPage);
+      updateGlobalInfoControls(globalInfoWithLogo);
+      const logoControlPassed = Boolean(
+        globalInfoLogoSlot &&
+        globalInfoWithLogo.logoSlot &&
+        globalInfoLogoSlot.assetId === globalInfoWithLogo.logoSlot.assetId
+      );
+      await applyGlobalInfoToPage(stepPage, readGlobalInfoFromControls());
+      const logoAfterApply = getGlobalInfoLogoSlotFromPage(stepPage);
+      const logoPassed = logoControlPassed &&
+        logoAfterApply.dataset.hasImage === "true" &&
+        logoAfterApply.dataset.assetId === globalInfoWithLogo.logoSlot.assetId;
+      document.body.dataset.selftestStep = "global-logo";
+
       const bomPassed = getMaterialFieldValue(numberCell, "number") === "MAT-001" &&
         getMaterialFieldValue(nameCell, "name") === "测试物料" &&
         getMaterialFieldValue(specCell, "spec") === "2PCS" &&
         imageSlot.dataset.hasImage === "true" &&
         bomPreviewPanel.hidden === false &&
         appShellEl.classList.contains("bom-preview-open");
-      const passed = bomPassed && stepCardPassed && materialCardPassed;
+      document.body.dataset.selftestStep = "sopzip-package";
+      const packageProject = serializeProject({ includeHistory: true });
+      const assetIds = Object.keys(packageProject.assets || {});
+      const packageBlob = await createSopPackageBlob(packageProject);
+      const packageZip = await window.JSZip.loadAsync(await packageBlob.arrayBuffer());
+      const packageDocumentText = await packageZip.file(SOP_PACKAGE_DOCUMENT_PATH).async("text");
+      const packageManifestText = await packageZip.file(SOP_PACKAGE_MANIFEST_PATH).async("text");
+      const packageDocument = JSON.parse(packageDocumentText);
+      const packageManifest = JSON.parse(packageManifestText);
+      const packageAssetPaths = assetIds.map((assetId) => packageDocument.assets[assetId] && packageDocument.assets[assetId].path);
+      const packagePassed = Boolean(
+        assetIds.length === 1 &&
+        packageZip.file(SOP_PACKAGE_DOCUMENT_PATH) &&
+        packageZip.file(SOP_PACKAGE_MANIFEST_PATH) &&
+        packageManifest.fileType === SOP_PACKAGE_FILE_TYPE &&
+        packageAssetPaths.every((path) => path && packageZip.file(path)) &&
+        !containsEmbeddedBase64(packageDocumentText) &&
+        Object.values(packageDocument.assets || {}).every((asset) => asset.path && asset.thumbnailPath)
+      );
+      const importedPackage = await importSopPackageFromFile(new File([packageBlob], "selftest.sopzip", { type: "application/zip" }));
+      const importPassed = Boolean(
+        importedPackage &&
+        importedPackage.fileType === SOP_FILE_TYPE &&
+        Object.keys(importedPackage.assets || {}).length === assetIds.length &&
+        Array.isArray(importedPackage.pages) &&
+        importedPackage.pages.length === packageProject.pages.length
+      );
+      document.body.dataset.selftestStep = "sopzip-import";
+      const passed = bomPassed && stepCardPassed && materialCardPassed && logoPassed && packagePassed && importPassed;
       document.body.dataset.selftest = passed ? "pass" : "fail";
       if (!passed) {
-        document.body.dataset.selftestError = `BOM:${bomPassed} STEP_CARD:${stepCardPassed} MATERIAL_CARD:${materialCardPassed}`;
+        document.body.dataset.selftestError = `BOM:${bomPassed} STEP_CARD:${stepCardPassed} MATERIAL_CARD:${materialCardPassed} LOGO:${logoPassed} PACKAGE:${packagePassed} IMPORT:${importPassed}`;
       }
     } catch (error) {
       document.body.dataset.selftest = "fail";
@@ -7128,7 +8774,7 @@
         resetRuntimeCounters();
         addPage();
         isApplyingProject = false;
-        initializeProjectState("未命名.sop.json", null, { folderId: getLibraryFolderForNewSop() });
+        initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop() });
       }
       await refreshLibrary();
       libraryStatusEl.textContent = "已删除电脑文件夹中的 SOP 文件";
@@ -7548,7 +9194,7 @@
         resetRuntimeCounters();
         addPage();
         isApplyingProject = false;
-        initializeProjectState("未命名.sop.json", null, { folderId: getLibraryFolderForNewSop() });
+        initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop() });
       }
       await refreshFeishuLibrary({ silent: true });
       libraryStatusEl.textContent = "已删除飞书云盘中的 SOP 文件";
@@ -7761,7 +9407,16 @@
   }
 
   function isProjectFileName(fileName) {
-    return /\.sop\.json$/i.test(String(fileName || ""));
+    return isSopPackageFileName(fileName) || isLegacyProjectFileName(fileName);
+  }
+
+  function isSopPackageFileName(fileName) {
+    return /\.sopzip$/i.test(String(fileName || ""));
+  }
+
+  function isLegacyProjectFileName(fileName) {
+    const value = String(fileName || "");
+    return /\.sop\.json$/i.test(value) || (/\.json$/i.test(value) && !isSopPackageFileName(value));
   }
 
   function isBomFileName(fileName) {
@@ -7773,7 +9428,10 @@
   }
 
   function removeProjectExtension(fileName) {
-    return String(fileName || "未命名").replace(/\.sop\.json$/i, "").replace(/\.json$/i, "");
+    return String(fileName || "未命名")
+      .replace(/\.sopzip$/i, "")
+      .replace(/\.sop\.json$/i, "")
+      .replace(/\.json$/i, "");
   }
 
   function removeBomExtension(fileName) {
@@ -7790,6 +9448,10 @@
 
   function idbPut(storeName, value) {
     return idbRequest(storeName, "readwrite", (store) => store.put(value));
+  }
+
+  function idbDelete(storeName, key) {
+    return idbRequest(storeName, "readwrite", (store) => store.delete(key));
   }
 
   function idbRequest(storeName, mode, operation) {
@@ -7888,6 +9550,7 @@
   }
 
   async function createPptxBlob(project, title) {
+    project = await hydrateProjectImageSourcesForExport(project);
     const zip = new JSZip();
     const pages = Array.isArray(project && project.pages) && project.pages.length ? project.pages : [{}];
     const media = [];
@@ -7913,12 +9576,14 @@
     const elements = [];
     const textByKey = new Map((pageData.textCells || []).map((cell) => [cell.key, cell]));
     const imageByKey = new Map((pageData.imageSlots || []).map((slot) => [slot.key, slot]));
+    const freeStepCards = getPptFreeStepCards(pageData);
+    if (freeStepCards.length) {
+      addFreeStepCardsToPptMaps(textByKey, imageByKey, freeStepCards);
+    }
     let editableIndex = 0;
     let imageIndex = 0;
 
-    const definitions = getTemplateCells(getPageDataStepTemplateCount(pageData))
-      .slice()
-      .sort((a, b) => (a.row - b.row) || (a.col - b.col));
+    const definitions = getPptPageDefinitions(pageData, freeStepCards);
     definitions.forEach((definition) => {
       const box = getPptCellBox(definition);
       if (definition.kind === "image") {
@@ -7945,6 +9610,52 @@
     const xml = pptSlideXml(elements.join(""));
     const relXml = pptRelationshipsXml(rels);
     return { xml, relXml };
+  }
+
+  function getPptFreeStepCards(pageData) {
+    if (!isFreeStepTemplateCount(getPageDataStepTemplateCount(pageData))) return [];
+    return normalizeFreeStepCards(pageData && pageData.stepCards);
+  }
+
+  function addFreeStepCardsToPptMaps(textByKey, imageByKey, cards) {
+    cards.forEach((card) => {
+      if (card.imageSlot) {
+        imageByKey.set(getFreeStepCardCellKey(card.id, "image"), {
+          ...structuredCloneSafe(card.imageSlot),
+          key: getFreeStepCardCellKey(card.id, "image")
+        });
+      }
+      if (card.descCell) {
+        textByKey.set(getFreeStepCardCellKey(card.id, "desc"), {
+          ...structuredCloneSafe(card.descCell),
+          key: getFreeStepCardCellKey(card.id, "desc")
+        });
+      }
+      if (card.noteCell) {
+        textByKey.set(getFreeStepCardCellKey(card.id, "note"), {
+          ...structuredCloneSafe(card.noteCell),
+          key: getFreeStepCardCellKey(card.id, "note")
+        });
+      }
+    });
+  }
+
+  function getPptPageDefinitions(pageData, freeStepCards) {
+    const count = getPageDataStepTemplateCount(pageData);
+    const definitions = getTemplateCells(count).slice();
+    if (isFreeStepTemplateCount(count)) {
+      const layout = layoutFreeStepCards(freeStepCards || []);
+      if (layout.ok) {
+        layout.placements.forEach((placement) => {
+          definitions.push(
+            placement.definitions.image,
+            placement.definitions.desc,
+            placement.definitions.note
+          );
+        });
+      }
+    }
+    return definitions.sort((a, b) => (a.row - b.row) || (a.col - b.col));
   }
 
   function addPptTextCell(elements, definition, box, text, shapeId) {
@@ -8805,11 +10516,15 @@
         [{}];
       const pageTotal = pagesData.length;
       for (let index = 0; index < pagesData.length; index += 1) {
-        const page = buildPage(nextPageId++);
+        const pageData = pagesData[index] || {};
+        const page = buildPage(nextPageId++, {
+          stepTemplateCount: getPageDataStepTemplateCount(pageData),
+          stepCards: pageData.stepCards
+        });
         page.dataset.batchDocumentId = documentItem.documentId || "";
         page.dataset.batchFileName = documentItem.name || "";
         pagesEl.appendChild(page);
-        await applyPageData(page, pagesData[index]);
+        await applyPageData(page, pageData);
         setPageNumberText(page, index + 1, pageTotal);
       }
 
@@ -8877,10 +10592,12 @@
     projectState.folderId = restore.folderId || DEFAULT_FOLDER_ID;
     projectState.libraryFileId = restore.libraryFileId || "";
     projectState.libraryFileHandle = restore.libraryFileHandle || null;
+    projectState.globalInfo = normalizeGlobalInfo(restore.project && restore.project.document && restore.project.document.globalInfo);
     projectState.history = cloneHistory(restore.history || []);
     if (restore.pageTitle) {
       document.title = restore.pageTitle;
     }
+    updateGlobalInfoControls(projectState.globalInfo);
     updateProjectUi();
   }
 
@@ -9030,6 +10747,7 @@
 
     pageCountEl.textContent = `${currentPageIndex()} / ${total}`;
     deletePageButton.disabled = total <= 1;
+    updateAddStepCardControl();
     renderPageList();
   }
 
@@ -9151,6 +10869,7 @@
     document.querySelectorAll(".page-list-button").forEach((button) => {
       button.classList.toggle("active", button.dataset.pageId === currentPageId);
     });
+    updateAddStepCardControl();
   }
 
   function currentPageIndex() {

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SOP模板编辑器</title>
-  <link rel="stylesheet" href="./styles.css?v=1.6.31">
+  <link rel="stylesheet" href="./styles.css?v=1.8.1">
 </head>
 <body>
   <main class="app-shell">
@@ -96,8 +96,57 @@
         </button>
         <select class="version-select" id="version-select" aria-label="版本历史"></select>
         <div class="file-status" id="file-status">未命名</div>
-        <input class="file-input" id="open-project-input" type="file" accept=".sop.json,.json,application/json">
+        <input class="file-input" id="open-project-input" type="file" accept=".sopzip,.sop.json,.json,application/zip,application/json">
       </div>
+      <section class="global-info-panel" id="global-info-panel" aria-label="SOP全局信息">
+        <div class="library-section-title">全局信息</div>
+        <div class="global-info-grid">
+          <label class="library-field" for="global-info-product">
+            <span>产品名称/编号</span>
+            <input id="global-info-product" type="text" data-global-info-key="productName">
+          </label>
+          <label class="library-field" for="global-info-sop-number">
+            <span>SOP编号</span>
+            <input id="global-info-sop-number" type="text" data-global-info-key="sopNumber">
+          </label>
+          <label class="library-field" for="global-info-version">
+            <span>版本</span>
+            <input id="global-info-version" type="text" data-global-info-key="version">
+          </label>
+          <label class="library-field" for="global-info-date">
+            <span>日期</span>
+            <input id="global-info-date" type="text" data-global-info-key="date">
+          </label>
+          <label class="library-field" for="global-info-author">
+            <span>编制</span>
+            <input id="global-info-author" type="text" data-global-info-key="author">
+          </label>
+          <label class="library-field" for="global-info-reviewer">
+            <span>审核</span>
+            <input id="global-info-reviewer" type="text" data-global-info-key="reviewer">
+          </label>
+          <label class="library-field" for="global-info-approver">
+            <span>批准</span>
+            <input id="global-info-approver" type="text" data-global-info-key="approver">
+          </label>
+        </div>
+        <div class="global-info-logo-field">
+          <div class="global-info-logo-header">
+            <span>Logo图片</span>
+            <div class="global-info-logo-actions">
+              <button class="library-action-button" id="global-info-logo-choose" type="button">插入logo</button>
+              <button class="library-action-button danger" id="global-info-logo-delete" type="button">删除</button>
+            </div>
+          </div>
+          <div class="global-info-logo-preview" id="global-info-logo-preview">未设置logo</div>
+          <input class="file-input" id="global-info-logo-input" type="file" accept=".ai,.eps,.pdf,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp,application/pdf,application/postscript,application/illustrator">
+        </div>
+        <div class="global-info-actions">
+          <button class="library-action-button" id="global-info-read-current" type="button">读取当前页</button>
+          <button class="library-action-button primary" id="global-info-save" type="button">保存并同步</button>
+        </div>
+        <div class="global-info-status" id="global-info-status">仅保存在当前 SOP 中</div>
+      </section>
       <div class="library-section-title">电脑文件夹</div>
       <div class="library-actions">
         <button class="library-action-button primary" id="library-pick-folder" type="button">选择文件夹</button>
@@ -161,6 +210,6 @@
 
   <script src="./vendor/xlsx.full.min.js"></script>
   <script src="./vendor/jszip.min.js"></script>
-  <script src="./app.js?v=1.6.31"></script>
+  <script src="./app.js?v=1.8.1"></script>
 </body>
 </html>
