@@ -1167,6 +1167,68 @@ button {
   outline-offset: -4px;
 }
 
+.step-card-cell.is-step-card-selected {
+  z-index: 8;
+  box-shadow:
+    inset 0 0 0 2px #2563eb,
+    0 8px 18px rgba(15, 23, 42, 0.1);
+}
+
+.step-card-cell.is-step-card-drag-over {
+  z-index: 9;
+  outline: 2px dashed #f59e0b;
+  outline-offset: -5px;
+}
+
+.step-card-cell.is-step-card-dragging {
+  opacity: 0.58;
+}
+
+.step-card-drag-handle {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  z-index: 7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #1f2937;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #a8b3c2;
+  border-radius: 5px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.16);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.step-card-drag-icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.process-image:hover .step-card-drag-handle,
+.process-image:focus-within .step-card-drag-handle,
+.process-image.is-step-card-selected .step-card-drag-handle {
+  opacity: 1;
+}
+
+.step-card-drag-handle:active {
+  cursor: grabbing;
+}
+
 .note-cell {
   background: var(--note);
   font-size: 13px;
@@ -2130,6 +2192,7 @@ body.editor-open {
   }
 
   .slot-tools,
+  .step-card-drag-handle,
   .image-empty,
   .image-editor-overlay {
     display: none;

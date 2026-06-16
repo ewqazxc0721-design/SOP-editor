@@ -61,7 +61,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.6.9";
+  const APP_VERSION = "1.6.12";
   const SOP_SCHEMA_VERSION = 2;
   const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
   const PRESET_OVERLAY_COLORS = [
@@ -101,12 +101,27 @@
   const displayableImageExtensions = [".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif", ".bmp", ".ico"];
   const logoSourceExtensions = [".ai", ".eps", ".pdf"];
   const bomFileExtensions = [".xlsx", ".xls", ".csv", ".tsv", ".txt", ".json"];
+  const STEP_CARD_DRAG_MIME = "application/x-sop-step-card";
+  const STEP_CARD_GROUPS = [
+    { imageKey: "c5r2", descKey: "c5r11", noteKey: "c5r13" },
+    { imageKey: "c8r2", descKey: "c8r11", noteKey: "c8r13" },
+    { imageKey: "c11r2", descKey: "c11r11", noteKey: "c11r13" },
+    { imageKey: "c14r2", descKey: "c14r11", noteKey: "c14r13" },
+    { imageKey: "c5r14", descKey: "c5r23", noteKey: "c5r25" },
+    { imageKey: "c8r14", descKey: "c8r23", noteKey: "c8r25" },
+    { imageKey: "c11r14", descKey: "c11r23", noteKey: "c11r25" },
+    { imageKey: "c14r14", descKey: "c14r23", noteKey: "c14r25" }
+  ];
 
   let nextPageId = 1;
   let currentPageId = null;
   let activeImageSlot = null;
   let activeMaterialSearchCell = null;
   let draggedPageId = null;
+  let draggedStepCard = null;
+  let stepCardPointerDrag = null;
+  let selectedStepCard = null;
+  let stepCardClipboard = null;
   let nextAnnotationLayerId = 1;
   let nextOverlayId = 1;
   let scrollTicking = false;
@@ -362,6 +377,9 @@
   document.addEventListener("pointerdown", handleGlobalBlankPointerDown);
   document.addEventListener("focusin", handleMaterialFocus);
   document.addEventListener("click", handleMaterialDocumentClick);
+  window.addEventListener("pointermove", handleStepCardPointerMove);
+  window.addEventListener("pointerup", endStepCardPointerDrag);
+  window.addEventListener("pointercancel", endStepCardPointerDrag);
   window.addEventListener("pointermove", handleGlobalPointerMove);
   window.addEventListener("pointerup", endGlobalDrag);
   window.addEventListener("pointercancel", endGlobalDrag);
@@ -516,8 +534,381 @@
     sheet.appendChild(buildGlobalOverlay(page));
     scale.appendChild(sheet);
     page.appendChild(scale);
+    setupStepCards(page);
     renderGlobalPageOverlays(page);
     return page;
+  }
+
+  function setupStepCards(page) {
+    STEP_CARD_GROUPS.forEach((group, index) => {
+      const elements = getStepCardElements(page, index);
+      [
+        { element: elements.image, role: "image" },
+        { element: elements.desc, role: "desc" },
+        { element: elements.note, role: "note" }
+      ].forEach(({ element, role }) => {
+        if (!element) return;
+        element.classList.add("step-card-cell", `step-card-${role}`);
+        element.dataset.stepCardIndex = String(index);
+        element.dataset.stepCardRole = role;
+        element.addEventListener("pointerdown", (event) => {
+          if (shouldIgnoreStepCardPointer(event)) return;
+          selectStepCard(page, index);
+        });
+        element.addEventListener("dragover", (event) => handleStepCardDragOver(event, page, index));
+        element.addEventListener("dragleave", () => setStepCardDragOver(page, index, false));
+        element.addEventListener("drop", (event) => handleStepCardDrop(event, page, index));
+      });
+      if (elements.image) {
+        addStepCardDragHandle(elements.image, page, index);
+      }
+    });
+  }
+
+  function getStepCardElements(page, index) {
+    const group = STEP_CARD_GROUPS[index];
+    if (!page || !group) {
+      return { image: null, desc: null, note: null };
+    }
+    return {
+      image: getPageCellByKey(page, group.imageKey),
+      desc: getPageCellByKey(page, group.descKey),
+      note: getPageCellByKey(page, group.noteKey)
+    };
+  }
+
+  function getPageCellByKey(page, key) {
+    if (!page || !key) return null;
+    return page.querySelector(`.sop-cell[data-cell-key="${cssEscape(key)}"]`);
+  }
+
+  function addStepCardDragHandle(imageSlot, page, index) {
+    if (imageSlot.querySelector(".step-card-drag-handle")) return;
+
+    const handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "step-card-drag-handle";
+    handle.title = "拖动排序";
+    handle.setAttribute("aria-label", "拖动步骤卡片排序");
+    handle.innerHTML = `
+      <svg class="step-card-drag-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d="M12 3v18M3 12h18M8 7l4-4 4 4M8 17l4 4 4-4M7 8l-4 4 4 4M17 8l4 4-4 4"></path>
+      </svg>
+    `;
+    handle.addEventListener("pointerdown", (event) => {
+      startStepCardPointerDrag(event, page, index);
+    });
+    handle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectStepCard(page, index);
+    });
+    imageSlot.appendChild(handle);
+  }
+
+  function shouldIgnoreStepCardPointer(event) {
+    if (event.button !== 0) return true;
+    return Boolean(event.target.closest("button, input, select, textarea, .slot-tools, .step-card-drag-handle"));
+  }
+
+  function selectStepCard(page, index) {
+    if (!page || !STEP_CARD_GROUPS[index]) return;
+    selectedStepCard = {
+      pageId: page.dataset.pageId,
+      index
+    };
+    renderStepCardSelection();
+  }
+
+  function clearStepCardSelection() {
+    selectedStepCard = null;
+    renderStepCardSelection();
+  }
+
+  function renderStepCardSelection() {
+    document.querySelectorAll(".step-card-cell").forEach((cell) => {
+      cell.classList.remove("is-step-card-selected");
+    });
+    if (!selectedStepCard) return;
+    const page = getPageById(selectedStepCard.pageId);
+    if (!page) return;
+    setStepCardSelected(page, selectedStepCard.index, true);
+  }
+
+  function setStepCardSelected(page, index, selected) {
+    Object.values(getStepCardElements(page, index)).forEach((element) => {
+      if (element) {
+        element.classList.toggle("is-step-card-selected", selected);
+      }
+    });
+  }
+
+  function setStepCardDragOver(page, index, active) {
+    Object.values(getStepCardElements(page, index)).forEach((element) => {
+      if (element) {
+        element.classList.toggle("is-step-card-drag-over", active);
+      }
+    });
+  }
+
+  function clearStepCardDragState() {
+    draggedStepCard = null;
+    stepCardPointerDrag = null;
+    document.querySelectorAll(".step-card-cell").forEach((cell) => {
+      cell.classList.remove("is-step-card-dragging", "is-step-card-drag-over");
+    });
+  }
+
+  function startStepCardPointerDrag(event, page, index) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    selectStepCard(page, index);
+    draggedStepCard = {
+      pageId: page.dataset.pageId,
+      index
+    };
+    stepCardPointerDrag = {
+      pageId: page.dataset.pageId,
+      index,
+      targetIndex: index,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false
+    };
+    if (event.currentTarget.setPointerCapture) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+  }
+
+  function handleStepCardPointerMove(event) {
+    const drag = stepCardPointerDrag;
+    if (!drag) return;
+
+    const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+    if (!drag.dragging && distance < 5) return;
+
+    event.preventDefault();
+    drag.dragging = true;
+    const page = getPageById(drag.pageId);
+    if (!page) {
+      clearStepCardDragState();
+      return;
+    }
+
+    Object.values(getStepCardElements(page, drag.index)).forEach((element) => {
+      if (element) {
+        element.classList.add("is-step-card-dragging");
+      }
+    });
+    document.querySelectorAll(".step-card-cell.is-step-card-drag-over").forEach((cell) => {
+      cell.classList.remove("is-step-card-drag-over");
+    });
+
+    const target = getStepCardTargetFromPoint(event.clientX, event.clientY);
+    if (!target || target.page.dataset.pageId !== drag.pageId || target.index === drag.index) {
+      drag.targetIndex = drag.index;
+      return;
+    }
+    drag.targetIndex = target.index;
+    setStepCardDragOver(target.page, target.index, true);
+  }
+
+  async function endStepCardPointerDrag(event) {
+    const drag = stepCardPointerDrag;
+    if (!drag) return;
+
+    const target = getStepCardTargetFromPoint(event.clientX, event.clientY);
+    const sourcePage = getPageById(drag.pageId);
+    const targetIndex = target && target.page.dataset.pageId === drag.pageId ? target.index : drag.targetIndex;
+    const shouldMove = drag.dragging &&
+      sourcePage &&
+      Number.isInteger(targetIndex) &&
+      targetIndex !== drag.index;
+
+    clearStepCardDragState();
+    if (!shouldMove) return;
+
+    try {
+      await moveStepCardWithinPage(sourcePage, drag.index, targetIndex);
+    } catch (error) {
+      showFileError("步骤卡片排序失败", error);
+    }
+  }
+
+  function getStepCardTargetFromPoint(x, y) {
+    const element = document.elementFromPoint(x, y);
+    const cell = element && element.closest ? element.closest(".step-card-cell") : null;
+    if (!cell) return null;
+    const page = cell.closest(".sop-page");
+    const index = Number(cell.dataset.stepCardIndex);
+    if (!page || !Number.isInteger(index)) return null;
+    return { page, index };
+  }
+
+  function handleStepCardDragStart(event, page, index) {
+    event.stopPropagation();
+    selectStepCard(page, index);
+    draggedStepCard = {
+      pageId: page.dataset.pageId,
+      index
+    };
+    Object.values(getStepCardElements(page, index)).forEach((element) => {
+      if (element) {
+        element.classList.add("is-step-card-dragging");
+      }
+    });
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(STEP_CARD_DRAG_MIME, JSON.stringify(draggedStepCard));
+    event.dataTransfer.setData("text/plain", `step-card:${page.dataset.pageId}:${index}`);
+  }
+
+  function handleStepCardDragOver(event, page, index) {
+    if (!isStepCardDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!draggedStepCard || draggedStepCard.pageId !== page.dataset.pageId) {
+      event.dataTransfer.dropEffect = "none";
+      return;
+    }
+    event.dataTransfer.dropEffect = draggedStepCard.index === index ? "none" : "move";
+    if (draggedStepCard.index !== index) {
+      setStepCardDragOver(page, index, true);
+    }
+  }
+
+  async function handleStepCardDrop(event, page, index) {
+    if (!isStepCardDragEvent(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const source = getStepCardDragSource(event);
+    clearStepCardDragState();
+    if (!source || source.pageId !== page.dataset.pageId || source.index === index) return;
+    await moveStepCardWithinPage(page, source.index, index);
+  }
+
+  function isStepCardDragEvent(event) {
+    const dataTransfer = event.dataTransfer;
+    if (!dataTransfer) return false;
+    const types = Array.from(dataTransfer.types || []).map((type) => String(type).toLowerCase());
+    return Boolean(draggedStepCard) || types.includes(STEP_CARD_DRAG_MIME);
+  }
+
+  function getStepCardDragSource(event) {
+    if (draggedStepCard) return draggedStepCard;
+    const raw = event.dataTransfer && event.dataTransfer.getData(STEP_CARD_DRAG_MIME);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return {
+        pageId: parsed.pageId,
+        index: Number(parsed.index)
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async function moveStepCardWithinPage(page, sourceIndex, targetIndex) {
+    if (!page || sourceIndex === targetIndex) return;
+    if (!STEP_CARD_GROUPS[sourceIndex] || !STEP_CARD_GROUPS[targetIndex]) return;
+    if (editor.isOpen && editor.slot && page.contains(editor.slot)) {
+      closeImageEditor();
+    }
+
+    const cards = STEP_CARD_GROUPS.map((_, index) => captureStepCardData(page, index));
+    const [moved] = cards.splice(sourceIndex, 1);
+    cards.splice(targetIndex, 0, moved);
+    await applyStepCardSequence(page, cards);
+    activeImageSlot = null;
+    selectStepCard(page, targetIndex);
+    markDirty();
+  }
+
+  async function applyStepCardSequence(page, cards) {
+    for (let index = 0; index < STEP_CARD_GROUPS.length; index += 1) {
+      await applyStepCardData(page, index, cards[index]);
+    }
+  }
+
+  function captureStepCardData(page, index) {
+    const elements = getStepCardElements(page, index);
+    return {
+      imageSlot: elements.image ? serializeImageSlot(elements.image) : null,
+      descCell: elements.desc ? serializeTextCell(elements.desc) : null,
+      noteCell: elements.note ? serializeTextCell(elements.note) : null
+    };
+  }
+
+  async function applyStepCardData(page, index, data) {
+    const elements = getStepCardElements(page, index);
+    if (!data || !elements.image || !elements.desc || !elements.note) return;
+
+    await applyImageSlotData(elements.image, {
+      ...(data.imageSlot || {}),
+      key: elements.image.dataset.cellKey || "",
+      fit: elements.image.dataset.fit || "contain",
+      logo: false
+    });
+    applySavedTextCell(elements.desc, {
+      ...(data.descCell || {}),
+      key: elements.desc.dataset.cellKey || ""
+    });
+    applySavedTextCell(elements.note, {
+      ...(data.noteCell || {}),
+      key: elements.note.dataset.cellKey || ""
+    });
+  }
+
+  function copySelectedStepCard() {
+    const selected = getSelectedStepCard();
+    if (!selected) return false;
+    stepCardClipboard = cloneStepCardData(captureStepCardData(selected.page, selected.index), {
+      regenerateIds: true
+    });
+    return true;
+  }
+
+  async function pasteStepCardToSelection() {
+    const selected = getSelectedStepCard();
+    if (!selected || !stepCardClipboard) return false;
+    if (editor.isOpen && editor.slot && selected.page.contains(editor.slot)) {
+      closeImageEditor();
+    }
+    await applyStepCardData(selected.page, selected.index, cloneStepCardData(stepCardClipboard, {
+      regenerateIds: true
+    }));
+    selectStepCard(selected.page, selected.index);
+    markDirty();
+    return true;
+  }
+
+  function getSelectedStepCard() {
+    if (!selectedStepCard) return null;
+    const page = getPageById(selectedStepCard.pageId);
+    if (!page || !STEP_CARD_GROUPS[selectedStepCard.index]) {
+      clearStepCardSelection();
+      return null;
+    }
+    return {
+      page,
+      index: selectedStepCard.index
+    };
+  }
+
+  function cloneStepCardData(data, options = {}) {
+    const clone = structuredCloneSafe(data || {});
+    if (options.regenerateIds && clone.imageSlot) {
+      ["annotations", "texts"].forEach((key) => {
+        if (!Array.isArray(clone.imageSlot[key])) return;
+        clone.imageSlot[key].forEach((model) => {
+          model.id = newOverlayId();
+        });
+      });
+    }
+    return clone;
   }
 
   function buildGlobalOverlay(page) {
@@ -2291,16 +2682,84 @@
       return;
     }
 
-    if (handle === "start") {
-      model.x1 = roundCoordinate(pointer.x);
-      model.y1 = roundCoordinate(pointer.y);
+    if (handle === "start" || handle === "end") {
+      resizeArrowEndpoint(model, origin, pointer, handle);
     } else if (handle === "control") {
       model.controlX = roundCoordinate(pointer.x);
       model.controlY = roundCoordinate(pointer.y);
-    } else {
-      model.x2 = roundCoordinate(pointer.x);
-      model.y2 = roundCoordinate(pointer.y);
     }
+  }
+
+  function resizeArrowEndpoint(model, origin, pointer, handle) {
+    ensureArrowControlPoint(origin);
+    const start = handle === "start" ?
+      { x: roundCoordinate(pointer.x), y: roundCoordinate(pointer.y) } :
+      { x: Number(origin.x1) || 0, y: Number(origin.y1) || 0 };
+    const end = handle === "end" ?
+      { x: roundCoordinate(pointer.x), y: roundCoordinate(pointer.y) } :
+      { x: Number(origin.x2) || 0, y: Number(origin.y2) || 0 };
+    const control = getArrowControlForEndpoints(origin, start, end);
+
+    model.x1 = start.x;
+    model.y1 = start.y;
+    model.x2 = end.x;
+    model.y2 = end.y;
+    model.controlX = control.x;
+    model.controlY = control.y;
+  }
+
+  function getArrowControlForEndpoints(origin, start, end) {
+    const originalStart = { x: Number(origin.x1) || 0, y: Number(origin.y1) || 0 };
+    const originalEnd = { x: Number(origin.x2) || 0, y: Number(origin.y2) || 0 };
+    const originalControl = { x: Number(origin.controlX) || 0, y: Number(origin.controlY) || 0 };
+    const originalVector = {
+      x: originalEnd.x - originalStart.x,
+      y: originalEnd.y - originalStart.y
+    };
+    const originalLength = Math.hypot(originalVector.x, originalVector.y);
+    const nextVector = {
+      x: end.x - start.x,
+      y: end.y - start.y
+    };
+    const nextLength = Math.hypot(nextVector.x, nextVector.y);
+
+    if (originalLength < 0.01 || nextLength < 0.01) {
+      return {
+        x: roundCoordinate((start.x + end.x) / 2),
+        y: roundCoordinate((start.y + end.y) / 2)
+      };
+    }
+
+    const originalUnit = {
+      x: originalVector.x / originalLength,
+      y: originalVector.y / originalLength
+    };
+    const originalNormal = {
+      x: -originalUnit.y,
+      y: originalUnit.x
+    };
+    const controlVector = {
+      x: originalControl.x - originalStart.x,
+      y: originalControl.y - originalStart.y
+    };
+    const alongRatio = (
+      controlVector.x * originalUnit.x +
+      controlVector.y * originalUnit.y
+    ) / originalLength;
+    const normalOffset = controlVector.x * originalNormal.x + controlVector.y * originalNormal.y;
+    const nextUnit = {
+      x: nextVector.x / nextLength,
+      y: nextVector.y / nextLength
+    };
+    const nextNormal = {
+      x: -nextUnit.y,
+      y: nextUnit.x
+    };
+
+    return {
+      x: roundCoordinate(start.x + nextVector.x * alongRatio + nextNormal.x * normalOffset),
+      y: roundCoordinate(start.y + nextVector.y * alongRatio + nextNormal.y * normalOffset)
+    };
   }
 
   function renderSlotOverlays(slot) {
@@ -3390,10 +3849,27 @@
     loadImageFile(slot, file);
   }
 
-  function handleDocumentKeyDown(event) {
+  async function handleDocumentKeyDown(event) {
     const activeElement = document.activeElement;
     const isTyping = activeElement &&
       (activeElement.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(activeElement.tagName));
+
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !isTyping && !editor.isOpen) {
+      const key = String(event.key || "").toLowerCase();
+      if (key === "c" && copySelectedStepCard()) {
+        event.preventDefault();
+        return;
+      }
+      if (key === "v" && stepCardClipboard && getSelectedStepCard()) {
+        event.preventDefault();
+        try {
+          await pasteStepCardToSelection();
+        } catch (error) {
+          showFileError("粘贴步骤卡片失败", error);
+        }
+        return;
+      }
+    }
 
     if (editor.isOpen) {
       if (event.key === "Escape") {
@@ -3691,22 +4167,24 @@
     return getPages().map((page) => {
       return {
         pageNumber: Number(page.dataset.pageNumber) || 0,
-        textCells: getEditableTextCells(page).map((cell) => {
-          const values = getTextCellFieldValues(cell);
-          const entry = {
-            key: cell.dataset.cellKey || "",
-            text: getTextCellPersistedText(cell)
-          };
-          if (values) {
-            entry.values = values;
-          }
-          return entry;
-        }),
+        textCells: getEditableTextCells(page).map(serializeTextCell),
         imageSlots: Array.from(page.querySelectorAll(".image-cell")).map(serializeImageSlot),
         globalAnnotations: (page._globalAnnotationModels || []).map(cloneModel),
         globalTexts: (page._globalTextModels || []).map(cloneModel)
       };
     });
+  }
+
+  function serializeTextCell(cell) {
+    const values = getTextCellFieldValues(cell);
+    const entry = {
+      key: cell.dataset.cellKey || "",
+      text: getTextCellPersistedText(cell)
+    };
+    if (values) {
+      entry.values = values;
+    }
+    return entry;
   }
 
   function serializeImageSlot(slot) {
@@ -3989,6 +4467,10 @@
     globalEditor.selected = null;
     globalEditor.drag = null;
     draggedPageId = null;
+    draggedStepCard = null;
+    stepCardPointerDrag = null;
+    selectedStepCard = null;
+    stepCardClipboard = null;
     nextAnnotationLayerId = 1;
     nextOverlayId = 1;
     updateGlobalEditState();
@@ -5167,15 +5649,47 @@
       await waitImageReady(matchedImg);
       await nextFrame();
 
-      const passed = getMaterialFieldValue(numberCell, "number") === "MAT-001" &&
+      const stepPage = getPages()[0];
+      const sourceStepImage = getPageCellByKey(stepPage, "c5r2");
+      const sourceStepDesc = getPageCellByKey(stepPage, "c5r11");
+      const sourceStepNote = getTextCellValueElement(getPageCellByKey(stepPage, "c5r13"), "value");
+      sourceStepDesc.textContent = "SELFTEST_STEP_SOURCE";
+      sourceStepNote.textContent = "SELFTEST_NOTE_SOURCE";
+      loadImageSource(sourceStepImage, imageData);
+      await waitImageReady(sourceStepImage.querySelector("img"));
+      await nextFrame();
+
+      selectStepCard(stepPage, 0);
+      const copied = copySelectedStepCard();
+      selectStepCard(stepPage, 1);
+      const pasted = await pasteStepCardToSelection();
+      const pastedStepDesc = getPageCellByKey(stepPage, "c8r11");
+      const pastedStepNote = getTextCellValueElement(getPageCellByKey(stepPage, "c8r13"), "value");
+      const pastedStepImage = getPageCellByKey(stepPage, "c8r2");
+      const pasteStepPassed = pasted &&
+        pastedStepDesc.textContent === "SELFTEST_STEP_SOURCE" &&
+        pastedStepNote.textContent === "SELFTEST_NOTE_SOURCE" &&
+        pastedStepImage.dataset.hasImage === "true";
+      await moveStepCardWithinPage(stepPage, 1, 3);
+      const movedStepDesc = getPageCellByKey(stepPage, "c14r11");
+      const movedStepNote = getTextCellValueElement(getPageCellByKey(stepPage, "c14r13"), "value");
+      const movedStepImage = getPageCellByKey(stepPage, "c14r2");
+      const stepCardPassed = copied &&
+        pasteStepPassed &&
+        movedStepDesc.textContent === "SELFTEST_STEP_SOURCE" &&
+        movedStepNote.textContent === "SELFTEST_NOTE_SOURCE" &&
+        movedStepImage.dataset.hasImage === "true";
+
+      const bomPassed = getMaterialFieldValue(numberCell, "number") === "MAT-001" &&
         getMaterialFieldValue(nameCell, "name") === "测试物料" &&
         getMaterialFieldValue(specCell, "spec") === "2PCS" &&
         imageSlot.dataset.hasImage === "true" &&
         bomPreviewPanel.hidden === false &&
         appShellEl.classList.contains("bom-preview-open");
+      const passed = bomPassed && stepCardPassed;
       document.body.dataset.selftest = passed ? "pass" : "fail";
       if (!passed) {
-        document.body.dataset.selftestError = "BOM selftest assertions failed";
+        document.body.dataset.selftestError = `BOM:${bomPassed} STEP_CARD:${stepCardPassed}`;
       }
     } catch (error) {
       document.body.dataset.selftest = "fail";
