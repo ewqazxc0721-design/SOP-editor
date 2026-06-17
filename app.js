@@ -114,12 +114,16 @@
   const PPT_SLIDE_HEIGHT_MM = 210;
   const PPT_CONTENT_X_MM = 5;
   const PPT_CONTENT_WIDTH_MM = 287;
-  const PPT_CONTENT_HEIGHT_MM = 182.48;
+  const PPT_CONTENT_HEIGHT_MM = 198;
   const PPT_CONTENT_Y_MM = (PPT_SLIDE_HEIGHT_MM - PPT_CONTENT_HEIGHT_MM) / 2;
   const PPT_GRID_WIDTH = 1340;
-  const PPT_GRID_HEIGHT = 852;
+  const PPT_GRID_HEIGHT = 924.46;
   const PPT_COL_FRACTIONS = [54, 54, 112, 112, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84, 84];
-  const PPT_ROW_FRACTIONS = [72, ...Array(26).fill(30)];
+  const PPT_ROW_FRACTIONS = [
+    36, 30,
+    ...Array(24).fill(34.5191666667),
+    30
+  ];
   const SOP_FILE_TYPE = "sop-template-project";
   const LIBRARY_DB_NAME = "sop-template-library";
   const LIBRARY_DB_VERSION = 4;
@@ -699,7 +703,7 @@
     const rootStyles = getComputedStyle(root);
     const workspaceStyles = getComputedStyle(workspace);
     const gridWidth = Number.parseFloat(rootStyles.getPropertyValue("--grid-width")) || 1340;
-    const gridHeight = Number.parseFloat(rootStyles.getPropertyValue("--grid-height")) || 852;
+    const gridHeight = Number.parseFloat(rootStyles.getPropertyValue("--grid-height")) || 924.46;
     const paddingX = (Number.parseFloat(workspaceStyles.paddingLeft) || 0) + (Number.parseFloat(workspaceStyles.paddingRight) || 0);
     const paddingY = (Number.parseFloat(workspaceStyles.paddingTop) || 0) + (Number.parseFloat(workspaceStyles.paddingBottom) || 0);
     const availableWidth = Math.max(0, workspace.clientWidth - paddingX);
@@ -10423,25 +10427,25 @@
     if (className.includes("section-title")) return { fill: "EEEEEE", bold: true, fontSize: 13.5, align: "center" };
     if (className.includes("note-cell")) return { fill: "FFF3C4", bold: true, fontSize: 9.75, align: "left" };
     if (className.includes("footer-cell")) return { fill: "EEEEEE", bold: false, fontSize: 9, align: className.includes("center") ? "center" : "left" };
-    if (className.includes("blank-cell")) return { fill: "FAFAFA", bold: false, fontSize: 9, align: "left" };
-    return { fill: "FFFFFF", bold: className.includes("material-label") ? false : false, fontSize: 9, align: className.includes("center") ? "center" : "left" };
+    if (className.includes("blank-cell")) return { fill: null, bold: false, fontSize: 9, align: "left" };
+    return { fill: null, bold: className.includes("material-label") ? false : false, fontSize: 9, align: className.includes("center") ? "center" : "left" };
   }
 
   function getPptImageCellStyle(definition) {
-    return { fill: definition.logo ? "D9D9D9" : "FAFAFA" };
+    return { fill: definition.logo ? "D9D9D9" : null };
   }
 
   function pptShapeXml(options) {
     const shapeId = options.id;
     const text = options.text || "";
-    const hasText = text.length > 0;
+    const textBodyXml = text.length ? pptTextBodyXml(text, options) : "";
     const fillXml = options.fill ? pptSolidFillXml(options.fill) : "<a:noFill/>";
     const lineXml = options.line ? pptLineXmlPart(options.line, options.lineWidth || 0.75) : "<a:ln><a:noFill/></a:ln>";
     return `
       <p:sp>
         <p:nvSpPr>
           <p:cNvPr id="${shapeId}" name="${xmlEscape(options.name || `Shape ${shapeId}`)}"/>
-          <p:cNvSpPr txBox="${hasText ? 1 : 0}"/>
+          <p:cNvSpPr><a:spLocks noMove="1" noResize="1" noChangeShapeType="1"/></p:cNvSpPr>
           <p:nvPr/>
         </p:nvSpPr>
         <p:spPr>
@@ -10450,7 +10454,7 @@
           ${fillXml}
           ${lineXml}
         </p:spPr>
-        ${pptTextBodyXml(text, options)}
+        ${textBodyXml}
       </p:sp>`;
   }
 
@@ -10563,7 +10567,9 @@
     }).join("");
     return `
       <p:txBody>
-        <a:bodyPr lIns="${margin}" tIns="${margin}" rIns="${margin}" bIns="${margin}" anchor="mid" wrap="square"/>
+        <a:bodyPr lIns="${margin}" tIns="${margin}" rIns="${margin}" bIns="${margin}" anchor="mid" wrap="square">
+          <a:noAutofit/>
+        </a:bodyPr>
         <a:lstStyle/>
         ${paragraphXml}
       </p:txBody>`;

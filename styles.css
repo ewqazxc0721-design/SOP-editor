@@ -7,7 +7,7 @@
   --note: #fff3c4;
   --focus: #2563eb;
   --grid-width: 1340px;
-  --grid-height: 852px;
+  --grid-height: 924.46px;
   --process-card-inset: 10px;
   --preview-scale: 1;
   --preview-page-width: var(--grid-width);
@@ -18,7 +18,7 @@
   --a4-height: 210mm;
   --print-side-margin: 5mm;
   --print-grid-width: calc(var(--a4-width) - (var(--print-side-margin) * 2));
-  --print-grid-height: 182.48mm;
+  --print-grid-height: 198mm;
   --print-scale: 0.80949583;
 }
 
@@ -1371,7 +1371,10 @@ button {
     54fr 54fr 112fr 112fr
     84fr 84fr 84fr 84fr 84fr 84fr
     84fr 84fr 84fr 84fr 84fr 84fr;
-  grid-template-rows: 72fr repeat(26, 30fr);
+  grid-template-rows:
+    36fr 30fr
+    repeat(24, 34.5191666667fr)
+    30fr;
   background: var(--paper);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
   transform: scale(var(--preview-scale));
@@ -2614,6 +2617,26 @@ body.editor-open {
     print-color-adjust: exact;
   }
 
+  body > :not(.app-shell) {
+    display: none !important;
+  }
+
+  [id*="extension" i],
+  [class*="extension" i],
+  [id*="plugin" i],
+  [class*="plugin" i],
+  [id*="sidebar" i],
+  [class*="sidebar" i],
+  [id*="toolbar" i],
+  [class*="toolbar" i] {
+    visibility: hidden !important;
+  }
+
+  .app-shell,
+  .app-shell * {
+    visibility: visible;
+  }
+
   .app-shell {
     display: block;
     height: auto;
@@ -2670,6 +2693,18 @@ body.editor-open {
     transform-origin: left top;
   }
 
+  .sop-sheet::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--line);
+    pointer-events: none;
+    z-index: 30;
+  }
+
   .sop-page:last-child {
     page-break-after: auto;
     break-after: auto;
@@ -2696,6 +2731,26 @@ body.editor-open {
 
   .global-text-box.is-selected {
     outline: none;
+  }
+
+  .step-card-cell.is-step-card-selected,
+  .step-card-cell.is-step-card-drag-over,
+  .step-card-cell.is-step-card-dragging,
+  .material-card-cell.is-material-card-selected,
+  .material-card-cell.is-material-card-drag-over,
+  .material-card-cell.is-material-card-dragging {
+    z-index: auto;
+    outline: none;
+    box-shadow: none;
+    filter: none;
+  }
+
+  .image-cell:focus,
+  .sop-cell[contenteditable="true"]:focus {
+    z-index: auto;
+    outline: none;
+    outline-offset: 0;
+    box-shadow: none;
   }
 
   .global-resize-handle,
