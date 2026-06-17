@@ -87,7 +87,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.8.1";
+  const APP_VERSION = "1.8.4";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -133,6 +133,7 @@
   const VERSION_PANEL_COLLAPSED_KEY = "sop-version-panel-collapsed";
   const BOM_PANEL_COLLAPSED_KEY = "sop-bom-panel-collapsed";
   const SOP_HISTORY_PANEL_COLLAPSED_KEY = "sop-history-panel-collapsed";
+  const MAX_UNDO_STEPS = 50;
   const GLOBAL_INFO_PANEL_COLLAPSED_KEY = "sop-global-info-panel-collapsed";
   const FOLDER_TREE_EXPANDED_KEY = "sop-folder-tree-expanded";
   const STORAGE_MODE_LOCAL = "local";
@@ -217,6 +218,11 @@
   let materialCardPointerDrag = null;
   let selectedMaterialCard = null;
   let materialCardClipboard = null;
+  let deferredCardPaste = null;
+  let cardClipboardIntent = null;
+  let cardClipboardIntentSerial = 0;
+  let undoStack = [];
+  let redoStack = [];
   let nextAnnotationLayerId = 1;
   let nextOverlayId = 1;
   let scrollTicking = false;
@@ -557,6 +563,12 @@
   document.addEventListener("pointerup", endStepCardPointerDrag, true);
   document.addEventListener("pointercancel", endStepCardPointerDrag, true);
   document.addEventListener("mousemove", handleStepCardPointerMove, true);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      clearCardClipboardIntent();
+    }
+  });
+  window.addEventListener("blur", clearCardClipboardIntent);
   document.addEventListener("mouseup", endStepCardPointerDrag, true);
   document.addEventListener("pointermove", handleMaterialCardPointerMove, true);
   document.addEventListener("pointerup", endMaterialCardPointerDrag, true);
@@ -1348,6 +1360,7 @@
 
     if (isFreeStepPage(page)) {
       syncFreeStepCardsFromDom(page);
+      pushUndoState("move-step-card");
       const cards = getFreeStepCards(page);
       const [moved] = cards.splice(sourceIndex, 1);
       cards.splice(targetIndex, 0, moved);
@@ -1359,6 +1372,7 @@
     }
 
     const cards = groups.map((_, index) => captureStepCardData(page, index));
+    pushUndoState("move-step-card");
     const [moved] = cards.splice(sourceIndex, 1);
     cards.splice(targetIndex, 0, moved);
     await applyStepCardSequence(page, cards);
@@ -1414,6 +1428,7 @@
       closeImageEditor();
     }
     syncFreeStepCardsFromDom(page);
+    pushUndoState("delete-step-card");
     getFreeStepCards(page).splice(index, 1);
     await applyFreeStepCardModels(page);
     activeImageSlot = null;
@@ -1442,6 +1457,7 @@
       showFileError("添加步骤卡片失败", new Error("当前页面剩余槽位不足，不能再添加这个尺寸的卡片。"));
       return false;
     }
+    pushUndoState("add-step-card");
     page._stepCards = nextCards;
     await applyFreeStepCardModels(page);
     selectStepCard(page, nextCards.length - 1);
@@ -1475,6 +1491,7 @@
     stepCardClipboard = cloneStepCardData(captureStepCardData(selected.page, selected.index), {
       regenerateIds: true
     });
+    markCardClipboardIntent("step");
     return true;
   }
 
@@ -1493,6 +1510,7 @@
       const insertedCards = cards.slice();
       insertedCards.splice(selected.index + 1, 0, copiedCard);
       if (layoutFreeStepCards(insertedCards).ok) {
+        pushUndoState("paste-step-card");
         selected.page._stepCards = insertedCards;
         await applyFreeStepCardModels(selected.page);
         selectStepCard(selected.page, selected.index + 1);
@@ -1507,6 +1525,7 @@
         id: targetId || copiedCard.id
       });
       if (layoutFreeStepCards(replacementCards).ok) {
+        pushUndoState("paste-step-card");
         selected.page._stepCards = replacementCards;
         await applyFreeStepCardModels(selected.page);
         selectStepCard(selected.page, selected.index);
@@ -1515,6 +1534,7 @@
       }
     }
 
+    pushUndoState("paste-step-card");
     await applyStepCardData(selected.page, selected.index, cloneStepCardData(stepCardClipboard, {
       regenerateIds: true
     }));
@@ -1849,6 +1869,7 @@
     }
 
     const cards = MATERIAL_CARD_GROUPS.map((_, index) => captureMaterialCardData(page, index));
+    pushUndoState("move-material-card");
     const [moved] = cards.splice(sourceIndex, 1);
     cards.splice(targetIndex, 0, moved);
     await applyMaterialCardSequence(page, cards);
@@ -1904,6 +1925,7 @@
     materialCardClipboard = cloneMaterialCardData(captureMaterialCardData(selected.page, selected.index), {
       regenerateIds: true
     });
+    markCardClipboardIntent("material");
     return true;
   }
 
@@ -1913,6 +1935,7 @@
     if (editor.isOpen && editor.slot && selected.page.contains(editor.slot)) {
       closeImageEditor();
     }
+    pushUndoState("paste-material-card");
     await applyMaterialCardData(selected.page, selected.index, cloneMaterialCardData(materialCardClipboard, {
       regenerateIds: true
     }));
@@ -4840,13 +4863,14 @@
 
   async function loadImageBlob(slot, blob, options = {}) {
     if (!slot || !blob) return;
+    const img = slot.querySelector("img");
+    if (!img) return;
+    pushUndoState("insert-image");
     clearObjectUrl(slot);
     if (!options.keepOverlays) {
       clearSlotOverlays(slot);
     }
     slot._sourceInfo = null;
-    const img = slot.querySelector("img");
-    if (!img) return;
     const asset = await createImageAssetFromBlob(projectState.documentId, blob, options.source || "file", {
       fileName: options.fileName || ""
     });
@@ -4860,6 +4884,7 @@
   }
 
   function loadLogoSourceFile(slot, file, extension) {
+    pushUndoState("insert-logo-source");
     clearObjectUrl(slot);
     resetSlotMedia(slot);
 
@@ -4879,8 +4904,12 @@
   }
 
   function deleteImage(slot, options = {}) {
+    const hasImage = slot && slot.dataset && slot.dataset.hasImage === "true";
     if (editor.isOpen && editor.slot === slot) {
       closeImageEditor();
+    }
+    if (hasImage) {
+      pushUndoState("delete-image");
     }
     clearObjectUrl(slot);
     resetSlotMedia(slot);
@@ -5144,6 +5173,8 @@
     if (!file) return;
 
     event.preventDefault();
+    cancelDeferredCardPaste();
+    clearCardClipboardIntent();
     activateImageSlot(slot);
     try {
       await loadImageFile(slot, file, { source: "clipboard" });
@@ -5163,10 +5194,100 @@
     })[0];
   }
 
+  function cancelDeferredCardPaste() {
+    if (deferredCardPaste && deferredCardPaste.timer) {
+      clearTimeout(deferredCardPaste.timer);
+    }
+    deferredCardPaste = null;
+  }
+
+  function markCardClipboardIntent(kind) {
+    cardClipboardIntent = {
+      kind,
+      serial: ++cardClipboardIntentSerial
+    };
+  }
+
+  function clearCardClipboardIntent() {
+    cardClipboardIntent = null;
+  }
+
+  function hasCardClipboardIntent(kind) {
+    return Boolean(cardClipboardIntent && cardClipboardIntent.kind === kind);
+  }
+
+  function scheduleDeferredCardPaste(kind) {
+    cancelDeferredCardPaste();
+    const selected = kind === "material" ? getSelectedMaterialCard() : getSelectedStepCard();
+    if (!selected) return false;
+
+    deferredCardPaste = {
+      kind,
+      pageId: selected.page.dataset.pageId,
+      index: selected.index,
+      timer: window.setTimeout(async () => {
+        const pending = deferredCardPaste;
+        deferredCardPaste = null;
+        if (!pending) return;
+
+        try {
+          if (pending.kind === "material") {
+            const selectedMaterial = getSelectedMaterialCard();
+            if (
+              selectedMaterial &&
+              selectedMaterial.page.dataset.pageId === pending.pageId &&
+              selectedMaterial.index === pending.index
+            ) {
+              await pasteMaterialCardToSelection();
+            }
+            return;
+          }
+
+          const selectedStep = getSelectedStepCard();
+          if (
+            selectedStep &&
+            selectedStep.page.dataset.pageId === pending.pageId &&
+            selectedStep.index === pending.index
+          ) {
+            await pasteStepCardToSelection();
+          }
+        } catch (error) {
+          showFileError(pending.kind === "material" ? "粘贴物料卡片失败" : "粘贴步骤卡片失败", error);
+        }
+      }, 80)
+    };
+    return true;
+  }
+
+  function shouldLetImageClipboardPasteFirst(event, kind) {
+    if (editor.isOpen) return false;
+    if (hasCardClipboardIntent(kind)) return false;
+    return Boolean(getPasteTarget(event.target));
+  }
+
   async function handleDocumentKeyDown(event) {
     const activeElement = document.activeElement;
     const isTyping = activeElement &&
       (activeElement.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(activeElement.tagName));
+
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !isTyping && !editor.isOpen) {
+      const key = String(event.key || "").toLowerCase();
+      const wantsRedo = (key === "y" && !event.shiftKey) || (key === "z" && event.shiftKey);
+      const wantsUndo = key === "z" && !event.shiftKey;
+      if (wantsUndo || wantsRedo) {
+        event.preventDefault();
+        try {
+          if (wantsRedo) {
+            await redoLastChange();
+          } else {
+            await undoLastChange();
+          }
+        } catch (error) {
+          showFileError(wantsRedo ? "重做失败" : "撤回失败", error);
+        }
+        return;
+      }
+    }
 
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !isTyping && !editor.isOpen) {
       const key = String(event.key || "").toLowerCase();
@@ -5179,6 +5300,9 @@
         return;
       }
       if (key === "v" && stepCardClipboard && getSelectedStepCard()) {
+        if (shouldLetImageClipboardPasteFirst(event, "step") && scheduleDeferredCardPaste("step")) {
+          return;
+        }
         event.preventDefault();
         try {
           await pasteStepCardToSelection();
@@ -5188,6 +5312,9 @@
         return;
       }
       if (key === "v" && materialCardClipboard && getSelectedMaterialCard()) {
+        if (shouldLetImageClipboardPasteFirst(event, "material") && scheduleDeferredCardPaste("material")) {
+          return;
+        }
         event.preventDefault();
         try {
           await pasteMaterialCardToSelection();
@@ -5271,6 +5398,7 @@
     projectState.globalInfo = normalizeGlobalInfo(options.globalInfo);
     projectState.assets = normalizeAssetRecords(options.assets || {});
     projectState.history = [];
+    clearUndoHistory();
     updateGlobalInfoControls(projectState.globalInfo);
     createVersionSnapshot("初始版本", { keepClean: true });
     updateGlobalInfoControls(projectState.globalInfo);
@@ -5447,6 +5575,85 @@
     URL.revokeObjectURL(url);
   }
 
+  function captureUndoState(reason = "") {
+    if (!projectState.documentId) return null;
+    return {
+      reason,
+      createdAt: new Date().toISOString(),
+      currentPageIndex: currentPageIndex(),
+      globalInfo: normalizeGlobalInfo(projectState.globalInfo),
+      pages: serializePages()
+    };
+  }
+
+  function pushUndoState(reason) {
+    if (isApplyingProject || !projectState.documentId) return;
+    const state = captureUndoState(reason);
+    if (!state) return;
+    undoStack.push(state);
+    if (undoStack.length > MAX_UNDO_STEPS) {
+      undoStack.splice(0, undoStack.length - MAX_UNDO_STEPS);
+    }
+    redoStack = [];
+  }
+
+  function clearUndoHistory() {
+    undoStack = [];
+    redoStack = [];
+  }
+
+  async function restoreUndoState(state) {
+    if (!state) return false;
+    const preservedStepClipboard = stepCardClipboard;
+    const preservedMaterialClipboard = materialCardClipboard;
+    const targetPageIndex = Math.max(0, Number(state.currentPageIndex || 1) - 1);
+
+    if (editor.isOpen) {
+      closeImageEditor();
+    }
+    cancelDeferredCardPaste();
+    projectState.globalInfo = normalizeGlobalInfo(state.globalInfo);
+    await applyPages(state.pages || []);
+    updateGlobalInfoControls(projectState.globalInfo);
+
+    const pages = getPages();
+    const targetPage = pages[Math.min(targetPageIndex, Math.max(0, pages.length - 1))];
+    if (targetPage) {
+      setCurrentPage(targetPage.dataset.pageId);
+    }
+
+    stepCardClipboard = preservedStepClipboard;
+    materialCardClipboard = preservedMaterialClipboard;
+    markDirty();
+    return true;
+  }
+
+  async function undoLastChange() {
+    if (!undoStack.length) return false;
+    const current = captureUndoState("redo");
+    const previous = undoStack.pop();
+    if (current) {
+      redoStack.push(current);
+      if (redoStack.length > MAX_UNDO_STEPS) {
+        redoStack.splice(0, redoStack.length - MAX_UNDO_STEPS);
+      }
+    }
+    return restoreUndoState(previous);
+  }
+
+  async function redoLastChange() {
+    if (!redoStack.length) return false;
+    const current = captureUndoState("undo");
+    const next = redoStack.pop();
+    if (current) {
+      undoStack.push(current);
+      if (undoStack.length > MAX_UNDO_STEPS) {
+        undoStack.splice(0, undoStack.length - MAX_UNDO_STEPS);
+      }
+    }
+    return restoreUndoState(next);
+  }
+
   function ensureCurrentVersionSnapshot(reason) {
     if (projectState.dirty || !projectState.history.length) {
       createVersionSnapshot(reason);
@@ -5595,6 +5802,7 @@
     projectState.libraryFileId = "";
     projectState.libraryFileHandle = null;
     projectState.history = Array.isArray(project.history) ? cloneHistory(project.history) : [];
+    clearUndoHistory();
     projectState.lastVersion = Math.max(
       Number(project.document && project.document.lastVersion) || 0,
       ...projectState.history.map((item) => Number(item.version) || 0),
@@ -6544,6 +6752,7 @@
     materialCardPointerDrag = null;
     selectedMaterialCard = null;
     materialCardClipboard = null;
+    clearCardClipboardIntent();
     nextAnnotationLayerId = 1;
     nextOverlayId = 1;
     updateGlobalEditState();
@@ -8443,6 +8652,22 @@
     try {
       document.body.dataset.selftestStep = "start";
       const imageData = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+      const pressShortcut = async (key, options = {}) => {
+        let prevented = false;
+        await handleDocumentKeyDown({
+          ctrlKey: options.ctrlKey !== false,
+          metaKey: false,
+          altKey: false,
+          shiftKey: Boolean(options.shiftKey),
+          key,
+          target: options.target || document.body,
+          preventDefault: () => {
+            prevented = true;
+          }
+        });
+        await delay(120);
+        return prevented;
+      };
       const csv = [
         "物料编号,物料名称,规格数量,图片",
         `MAT-001,测试物料,2PCS,"${imageData}"`
@@ -8483,7 +8708,7 @@
       await nextFrame();
       document.body.dataset.selftestStep = "bom-match";
 
-      const stepPage = getPages()[0];
+      let stepPage = getPages()[0];
       const sourceStep = getStepCardElements(stepPage, 0);
       const sourceStepImage = sourceStep.image;
       const sourceStepDesc = sourceStep.desc;
@@ -8496,13 +8721,90 @@
 
       selectStepCard(stepPage, 0);
       const copied = copySelectedStepCard();
+      clearCardClipboardIntent();
+
+      const imagePasteStep = getStepCardElements(stepPage, 2);
+      const imagePasteStepDesc = imagePasteStep.desc;
+      const imagePasteStepNote = getTextCellValueElement(imagePasteStep.note, "value");
+      imagePasteStepDesc.textContent = "SELFTEST_IMAGE_TARGET";
+      imagePasteStepNote.textContent = "SELFTEST_IMAGE_TARGET_NOTE";
+      deleteImage(imagePasteStep.image, { keepFocus: false });
+      selectStepCard(stepPage, 2);
+      activateImageSlot(imagePasteStep.image);
+      let imagePasteKeyPrevented = false;
+      let imagePasteEventPrevented = false;
+      const clipboardImageFile = new File([await imageSourceToBlob(imageData)], "selftest-clipboard.png", { type: "image/png" });
+      await handleDocumentKeyDown({
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: "v",
+        target: imagePasteStep.image,
+        preventDefault: () => {
+          imagePasteKeyPrevented = true;
+        }
+      });
+      await handleDocumentPaste({
+        clipboardData: {
+          items: [{
+            kind: "file",
+            type: "image/png",
+            getAsFile: () => clipboardImageFile
+          }]
+        },
+        target: imagePasteStep.image,
+        preventDefault: () => {
+          imagePasteEventPrevented = true;
+        }
+      });
+      await delay(120);
+      await waitImageReady(imagePasteStep.image.querySelector("img"));
+      await nextFrame();
+      const imageClipboardPriorityPassed = !imagePasteKeyPrevented &&
+        imagePasteEventPrevented &&
+        imagePasteStepDesc.textContent === "SELFTEST_IMAGE_TARGET" &&
+        imagePasteStepNote.textContent === "SELFTEST_IMAGE_TARGET_NOTE" &&
+        imagePasteStep.image.dataset.hasImage === "true";
+
+      const imageUndoPrevented = await pressShortcut("z", { target: imagePasteStep.image });
+      stepPage = getPages()[0];
+      const imageAfterUndo = getStepCardElements(stepPage, 2);
+      const imageRedoPrevented = await pressShortcut("y", { target: imageAfterUndo.image });
+      stepPage = getPages()[0];
+      const imageAfterRedo = getStepCardElements(stepPage, 2);
+      await waitImageReady(imageAfterRedo.image.querySelector("img"));
+      await nextFrame();
+      const imageUndoRedoPassed = imageUndoPrevented &&
+        imageRedoPrevented &&
+        imageAfterUndo.image.dataset.hasImage !== "true" &&
+        imageAfterRedo.image.dataset.hasImage === "true" &&
+        imageAfterRedo.desc.textContent === "SELFTEST_IMAGE_TARGET" &&
+        getTextCellValueElement(imageAfterRedo.note, "value").textContent === "SELFTEST_IMAGE_TARGET_NOTE";
+
+      selectStepCard(stepPage, 0);
+      const copiedAgainAfterImage = copySelectedStepCard();
       selectStepCard(stepPage, 1);
-      const pasted = await pasteStepCardToSelection();
+      const keyPasteTarget = getStepCardElements(stepPage, 1);
+      activateImageSlot(keyPasteTarget.image);
+      let cardPasteKeyPrevented = false;
+      await handleDocumentKeyDown({
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+        shiftKey: false,
+        key: "v",
+        target: keyPasteTarget.image,
+        preventDefault: () => {
+          cardPasteKeyPrevented = true;
+        }
+      });
       const pastedStep = getStepCardElements(stepPage, 1);
       const pastedStepDesc = pastedStep.desc;
       const pastedStepNote = getTextCellValueElement(pastedStep.note, "value");
       const pastedStepImage = pastedStep.image;
-      const pasteStepPassed = pasted &&
+      const pasteStepPassed = copiedAgainAfterImage &&
+        cardPasteKeyPrevented &&
         pastedStepDesc.textContent === "SELFTEST_STEP_SOURCE" &&
         pastedStepNote.textContent === "SELFTEST_NOTE_SOURCE" &&
         pastedStepImage.dataset.hasImage === "true";
@@ -8511,11 +8813,29 @@
       const movedStepDesc = movedStep.desc;
       const movedStepNote = getTextCellValueElement(movedStep.note, "value");
       const movedStepImage = movedStep.image;
+      const stepMoveUndoPrevented = await pressShortcut("z", { target: movedStepImage });
+      stepPage = getPages()[0];
+      const stepAfterUndo = getStepCardElements(stepPage, 1);
+      const stepMoveUndoPassed = stepMoveUndoPrevented &&
+        stepAfterUndo.desc.textContent === "SELFTEST_STEP_SOURCE" &&
+        getTextCellValueElement(stepAfterUndo.note, "value").textContent === "SELFTEST_NOTE_SOURCE" &&
+        stepAfterUndo.image.dataset.hasImage === "true";
+      const stepMoveRedoPrevented = await pressShortcut("y", { target: stepAfterUndo.image });
+      stepPage = getPages()[0];
+      const stepAfterRedo = getStepCardElements(stepPage, 3);
+      const stepMoveRedoPassed = stepMoveRedoPrevented &&
+        stepAfterRedo.desc.textContent === "SELFTEST_STEP_SOURCE" &&
+        getTextCellValueElement(stepAfterRedo.note, "value").textContent === "SELFTEST_NOTE_SOURCE" &&
+        stepAfterRedo.image.dataset.hasImage === "true";
       const stepCardPassed = copied &&
+        imageClipboardPriorityPassed &&
+        imageUndoRedoPassed &&
         pasteStepPassed &&
         movedStepDesc.textContent === "SELFTEST_STEP_SOURCE" &&
         movedStepNote.textContent === "SELFTEST_NOTE_SOURCE" &&
-        movedStepImage.dataset.hasImage === "true";
+        movedStepImage.dataset.hasImage === "true" &&
+        stepMoveUndoPassed &&
+        stepMoveRedoPassed;
       document.body.dataset.selftestStep = "step-card";
 
       const sourceMaterialImage = getPageCellByKey(stepPage, "c1r15");
@@ -8548,12 +8868,36 @@
       const movedMaterialName = getPageCellByKey(stepPage, "c3r24");
       const movedMaterialNumber = getPageCellByKey(stepPage, "c3r25");
       const movedMaterialSpec = getPageCellByKey(stepPage, "c3r26");
+      const materialMoveUndoPrevented = await pressShortcut("z", { target: movedMaterialImage });
+      stepPage = getPages()[0];
+      const materialAfterUndoImage = getPageCellByKey(stepPage, "c1r18");
+      const materialAfterUndoName = getPageCellByKey(stepPage, "c3r18");
+      const materialAfterUndoNumber = getPageCellByKey(stepPage, "c3r19");
+      const materialAfterUndoSpec = getPageCellByKey(stepPage, "c3r20");
+      const materialMoveUndoPassed = materialMoveUndoPrevented &&
+        getMaterialFieldValue(materialAfterUndoName, "name") === "SELFTEST_MATERIAL_NAME" &&
+        getMaterialFieldValue(materialAfterUndoNumber, "number") === "SELFTEST-MAT-001" &&
+        getMaterialFieldValue(materialAfterUndoSpec, "spec") === "SELFTEST_SPEC" &&
+        materialAfterUndoImage.dataset.hasImage === "true";
+      const materialMoveRedoPrevented = await pressShortcut("y", { target: materialAfterUndoImage });
+      stepPage = getPages()[0];
+      const materialAfterRedoImage = getPageCellByKey(stepPage, "c1r24");
+      const materialAfterRedoName = getPageCellByKey(stepPage, "c3r24");
+      const materialAfterRedoNumber = getPageCellByKey(stepPage, "c3r25");
+      const materialAfterRedoSpec = getPageCellByKey(stepPage, "c3r26");
+      const materialMoveRedoPassed = materialMoveRedoPrevented &&
+        getMaterialFieldValue(materialAfterRedoName, "name") === "SELFTEST_MATERIAL_NAME" &&
+        getMaterialFieldValue(materialAfterRedoNumber, "number") === "SELFTEST-MAT-001" &&
+        getMaterialFieldValue(materialAfterRedoSpec, "spec") === "SELFTEST_SPEC" &&
+        materialAfterRedoImage.dataset.hasImage === "true";
       const materialCardPassed = materialCopied &&
         pasteMaterialPassed &&
         getMaterialFieldValue(movedMaterialName, "name") === "SELFTEST_MATERIAL_NAME" &&
         getMaterialFieldValue(movedMaterialNumber, "number") === "SELFTEST-MAT-001" &&
         getMaterialFieldValue(movedMaterialSpec, "spec") === "SELFTEST_SPEC" &&
-        movedMaterialImage.dataset.hasImage === "true";
+        movedMaterialImage.dataset.hasImage === "true" &&
+        materialMoveUndoPassed &&
+        materialMoveRedoPassed;
       document.body.dataset.selftestStep = "material-card";
 
       const logoSlot = getGlobalInfoLogoSlotFromPage(stepPage);
@@ -8574,10 +8918,15 @@
         logoAfterApply.dataset.assetId === globalInfoWithLogo.logoSlot.assetId;
       document.body.dataset.selftestStep = "global-logo";
 
-      const bomPassed = getMaterialFieldValue(numberCell, "number") === "MAT-001" &&
-        getMaterialFieldValue(nameCell, "name") === "测试物料" &&
-        getMaterialFieldValue(specCell, "spec") === "2PCS" &&
-        imageSlot.dataset.hasImage === "true" &&
+      const bomPageNow = getPages()[0];
+      const bomNumberCell = bomPageNow.querySelector(".text-cell[data-material-field='number'][data-material-index='0']");
+      const bomNameCell = bomPageNow.querySelector(".text-cell[data-material-field='name'][data-material-index='0']");
+      const bomSpecCell = bomPageNow.querySelector(".text-cell[data-material-field='spec'][data-material-index='0']");
+      const bomImageSlot = bomPageNow.querySelector(".image-cell[data-material-index='0']");
+      const bomPassed = getMaterialFieldValue(bomNumberCell, "number") === "MAT-001" &&
+        getMaterialFieldValue(bomNameCell, "name") === "测试物料" &&
+        getMaterialFieldValue(bomSpecCell, "spec") === "2PCS" &&
+        bomImageSlot.dataset.hasImage === "true" &&
         bomPreviewPanel.hidden === false &&
         appShellEl.classList.contains("bom-preview-open");
       document.body.dataset.selftestStep = "sopzip-package";
