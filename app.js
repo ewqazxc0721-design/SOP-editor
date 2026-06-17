@@ -88,7 +88,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.8.6";
+  const APP_VERSION = "1.8.7";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -5867,15 +5867,16 @@
       closeImageEditor();
     }
 
+    const documentInfo = project && project.document ? project.document : {};
+    projectState.documentId = documentInfo.id || createId("doc");
+    projectState.fileName = fileName || documentInfo.fileName || "未命名.sopzip";
+    projectState.fileHandle = fileHandle || null;
+    projectState.folderId = documentInfo.folderId || DEFAULT_FOLDER_ID;
+    projectState.libraryFileId = "";
+    projectState.libraryFileHandle = null;
     projectState.globalInfo = normalizeGlobalInfo(project.document && project.document.globalInfo);
     projectState.assets = normalizeAssetRecords(project.assets || {});
     await applyPages(project.pages || []);
-    projectState.documentId = project.document && project.document.id ? project.document.id : createId("doc");
-    projectState.fileName = fileName || (project.document && project.document.fileName) || "未命名.sopzip";
-    projectState.fileHandle = fileHandle || null;
-    projectState.folderId = project.document && project.document.folderId ? project.document.folderId : DEFAULT_FOLDER_ID;
-    projectState.libraryFileId = "";
-    projectState.libraryFileHandle = null;
     projectState.history = Array.isArray(project.history) ? cloneHistory(project.history) : [];
     clearUndoHistory();
     projectState.lastVersion = Math.max(
