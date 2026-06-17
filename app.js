@@ -87,7 +87,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.8.4";
+  const APP_VERSION = "1.8.5";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -96,6 +96,10 @@
   const SOP_PACKAGE_EXTENSION = ".sopzip";
   const LEGACY_PROJECT_EXTENSIONS = [".sop.json", ".json"];
   const MAX_IMAGE_ASSET_BYTES = 10 * 1024 * 1024;
+  const CLIPBOARD_MATERIAL_IMAGE_TARGET_BYTES = 100 * 1024;
+  const CLIPBOARD_DEFAULT_IMAGE_TARGET_BYTES = 220 * 1024;
+  const CLIPBOARD_MATERIAL_IMAGE_MAX_SIDE = 1000;
+  const CLIPBOARD_DEFAULT_IMAGE_MAX_SIDE = 1600;
   const ALLOWED_ASSET_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
   const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
   const PRESET_OVERLAY_COLORS = [
@@ -4849,7 +4853,11 @@
       return;
     }
 
-    await loadImageBlob(slot, file, {
+    const imageBlob = options.source === "clipboard" ?
+      await compressClipboardImageBlob(file, slot).catch(() => file) :
+      file;
+
+    await loadImageBlob(slot, imageBlob, {
       source: options.source || "file",
       fileName: file.name || ""
     });
@@ -6245,6 +6253,73 @@
     ctx.drawImage(image, 0, 0, width, height);
     return new Promise((resolve) => {
       canvas.toBlob((result) => resolve(result || blob), "image/webp", 0.82);
+    });
+  }
+
+  async function compressClipboardImageBlob(blob, slot) {
+    if (!blob || !ALLOWED_ASSET_IMAGE_MIMES.has(normalizeAssetMime(blob.type))) return blob;
+
+    const options = getClipboardCompressionOptions(slot);
+    const image = await loadImageElementFromBlob(blob);
+    const sourceWidth = image.naturalWidth || 1;
+    const sourceHeight = image.naturalHeight || 1;
+    let scale = Math.min(1, options.maxSide / Math.max(sourceWidth, sourceHeight));
+    let bestBlob = blob;
+
+    for (let resizePass = 0; resizePass < 7; resizePass += 1) {
+      const width = Math.max(1, Math.round(sourceWidth * scale));
+      const height = Math.max(1, Math.round(sourceHeight * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d", { alpha: true });
+      if (!ctx) return bestBlob;
+      ctx.drawImage(image, 0, 0, width, height);
+
+      const encoded = await encodeCanvasWithinTarget(canvas, options.targetBytes);
+      if (encoded && encoded.size < bestBlob.size) {
+        bestBlob = encoded;
+      }
+      if (encoded && encoded.size <= options.targetBytes) {
+        return encoded;
+      }
+
+      if (Math.max(width, height) <= options.minSide) break;
+      const ratio = encoded && encoded.size ? Math.sqrt(options.targetBytes / encoded.size) : 0.85;
+      scale = Math.max(options.minSide / Math.max(sourceWidth, sourceHeight), scale * clamp(ratio * 0.92, 0.68, 0.9));
+    }
+
+    return bestBlob;
+  }
+
+  function getClipboardCompressionOptions(slot) {
+    const isMaterial = Boolean(slot && slot.dataset && slot.dataset.material === "true");
+    return {
+      targetBytes: isMaterial ? CLIPBOARD_MATERIAL_IMAGE_TARGET_BYTES : CLIPBOARD_DEFAULT_IMAGE_TARGET_BYTES,
+      maxSide: isMaterial ? CLIPBOARD_MATERIAL_IMAGE_MAX_SIDE : CLIPBOARD_DEFAULT_IMAGE_MAX_SIDE,
+      minSide: isMaterial ? 480 : 720
+    };
+  }
+
+  async function encodeCanvasWithinTarget(canvas, targetBytes) {
+    const qualities = [0.82, 0.72, 0.62, 0.52, 0.44, 0.36, 0.28];
+    let bestBlob = null;
+    for (const quality of qualities) {
+      const blob = await canvasToBlob(canvas, "image/webp", quality);
+      if (!blob || !ALLOWED_ASSET_IMAGE_MIMES.has(normalizeAssetMime(blob.type))) continue;
+      if (!bestBlob || blob.size < bestBlob.size) {
+        bestBlob = blob;
+      }
+      if (blob.size <= targetBytes) {
+        return blob;
+      }
+    }
+    return bestBlob;
+  }
+
+  function canvasToBlob(canvas, mime, quality) {
+    return new Promise((resolve) => {
+      canvas.toBlob((blob) => resolve(blob), mime, quality);
     });
   }
 
