@@ -411,6 +411,13 @@ button {
   color: #991b1b;
 }
 
+.global-edit-button.stamp-button,
+.editor-tool-button[data-editor-action^="stamp-"] {
+  min-width: 48px;
+  font-weight: 800;
+  color: #ef1d1d;
+}
+
 .global-edit-button:disabled {
   color: #94a3b8;
   background: #eef1f5;
@@ -1923,6 +1930,18 @@ button {
   border-radius: 12px;
 }
 
+.slot-text-box.is-stamp {
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  background: #ffffff;
+  border-color: transparent;
+}
+
 .slot-bubble-tail-svg {
   position: absolute;
   inset: 0;
@@ -2010,6 +2029,25 @@ button {
   background: transparent;
   border-color: transparent;
   border-radius: 16px;
+}
+
+.global-text-box.is-stamp {
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border-color: transparent;
+}
+
+.global-text-box.is-stamp .global-text-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  cursor: move;
 }
 
 .global-bubble-tail-svg {
@@ -2451,6 +2489,25 @@ body.editor-open {
   background: transparent;
   border-color: transparent;
   border-radius: 14px;
+}
+
+.editor-text-box.is-stamp {
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border-color: transparent;
+}
+
+.editor-text-box.is-stamp .editor-text-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  cursor: move;
 }
 
 .editor-text-content {

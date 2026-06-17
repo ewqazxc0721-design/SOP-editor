@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SOP模板编辑器</title>
-  <link rel="stylesheet" href="./styles.css?v=1.8.7">
+  <link rel="stylesheet" href="./styles.css?v=1.8.9">
 </head>
 <body>
   <main class="app-shell">
@@ -59,6 +59,9 @@
         <button class="global-edit-button" id="global-edit-circle" type="button" data-global-action="circle">圆圈</button>
         <button class="global-edit-button" id="global-edit-rect" type="button" data-global-action="rect">矩形框</button>
         <button class="global-edit-button" id="global-edit-arrow" type="button" data-global-action="arrow">箭头</button>
+        <button class="global-edit-button stamp-button" id="global-edit-stamp-ok" type="button" data-global-action="stamp-ok">OK</button>
+        <button class="global-edit-button stamp-button" id="global-edit-stamp-ng" type="button" data-global-action="stamp-ng">NG</button>
+        <button class="global-edit-button stamp-button" id="global-edit-stamp-product" type="button" data-global-action="stamp-product">成品</button>
         <button class="global-edit-button danger" id="global-edit-delete" type="button" data-global-action="delete">删除所选</button>
       </div>
       <div class="pages" id="pages"></div>
@@ -214,6 +217,6 @@
 
   <script src="./vendor/xlsx.full.min.js"></script>
   <script src="./vendor/jszip.min.js"></script>
-  <script src="./app.js?v=1.8.7"></script>
+  <script src="./app.js?v=1.8.9"></script>
 </body>
 </html>

@@ -85,10 +85,13 @@
     circle: document.getElementById("global-edit-circle"),
     rect: document.getElementById("global-edit-rect"),
     arrow: document.getElementById("global-edit-arrow"),
+    stampOk: document.getElementById("global-edit-stamp-ok"),
+    stampNg: document.getElementById("global-edit-stamp-ng"),
+    stampProduct: document.getElementById("global-edit-stamp-product"),
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.8.7";
+  const APP_VERSION = "1.9.0";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -97,15 +100,21 @@
   const SOP_PACKAGE_EXTENSION = ".sopzip";
   const LEGACY_PROJECT_EXTENSIONS = [".sop.json", ".json"];
   const MAX_IMAGE_ASSET_BYTES = 10 * 1024 * 1024;
-  const CLIPBOARD_MATERIAL_IMAGE_TARGET_BYTES = 100 * 1024;
-  const CLIPBOARD_DEFAULT_IMAGE_TARGET_BYTES = 220 * 1024;
-  const CLIPBOARD_MATERIAL_IMAGE_MAX_SIDE = 1000;
-  const CLIPBOARD_DEFAULT_IMAGE_MAX_SIDE = 1600;
+  const MATERIAL_IMAGE_TARGET_BYTES = 50 * 1024;
+  const DEFAULT_IMAGE_TARGET_BYTES = 100 * 1024;
+  const MATERIAL_IMAGE_MAX_SIDE = 500;
+  const DEFAULT_IMAGE_MAX_SIDE = 1200;
   const MATERIAL_AREA_TEXT_CELL_KEY = "materialAreaText";
   const MATERIAL_TABLE_MODE = "table";
   const MATERIAL_TEXT_MODE = "text";
   const ALLOWED_ASSET_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
   const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
+  const STAMP_TYPES = new Set(["stamp-ok", "stamp-ng", "stamp-product"]);
+  const STAMP_LABELS = {
+    "stamp-ok": "OK",
+    "stamp-ng": "NG",
+    "stamp-product": "成品"
+  };
   const PRESET_OVERLAY_COLORS = [
     { name: "红色", value: "#ef1d1d" },
     { name: "橙色", value: "#f97316" },
@@ -233,6 +242,7 @@
   let deferredCardPaste = null;
   let cardClipboardIntent = null;
   let cardClipboardIntentSerial = 0;
+  let overlayClipboard = null;
   let undoStack = [];
   let redoStack = [];
   let nextAnnotationLayerId = 1;
@@ -440,11 +450,11 @@
       materialArea: MATERIAL_TABLE_MODE,
       fields: [{ key: "value", label: "物料编号：", grow: true, minChars: 6 }]
     }));
-    templateCells.push(textCell(3, row + 2, 2, 1, "规格数量：", "material-label left material-table-cell", {
+    templateCells.push(textCell(3, row + 2, 2, 1, "规格/数量：", "material-label left material-table-cell", {
       materialIndex: index,
       materialField: "spec",
       materialArea: MATERIAL_TABLE_MODE,
-      fields: [{ key: "value", label: "规格数量：", grow: true, minChars: 6 }]
+      fields: [{ key: "value", label: "规格/数量：", grow: true, minChars: 6 }]
     }));
   });
 
@@ -560,7 +570,7 @@
   });
   Object.entries(globalEditButtons).forEach(([action, button]) => {
     if (button) {
-      button.addEventListener("click", () => handleGlobalEditCommand(action));
+      button.addEventListener("click", () => handleGlobalEditCommand(button.dataset.globalAction || action));
     }
   });
   if (globalColorPresetList) {
@@ -2230,6 +2240,7 @@
       naturalWidth: Number(clone.imageState && clone.imageState.naturalWidth) || 0,
       naturalHeight: Number(clone.imageState && clone.imageState.naturalHeight) || 0,
       scale: Number(clone.imageState && clone.imageState.scale) || 1,
+      allowUnderfill: Boolean(clone.imageState && clone.imageState.allowUnderfill),
       x: Number(clone.imageState && clone.imageState.x) || 0,
       y: Number(clone.imageState && clone.imageState.y) || 0
     };
@@ -2300,6 +2311,7 @@
         naturalWidth: asset.width,
         naturalHeight: asset.height,
         scale: 1,
+        allowUnderfill: false,
         x: 0,
         y: 0
       },
@@ -2607,6 +2619,7 @@
       naturalWidth: 0,
       naturalHeight: 0,
       scale: 1,
+      allowUnderfill: false,
       x: 0,
       y: 0,
       dragging: false,
@@ -2667,6 +2680,10 @@
     editor.buttons.circle = buildEditorButton("circle", "圆圈");
     editor.buttons.rect = buildEditorButton("rect", "矩形");
     editor.buttons.arrow = buildEditorButton("arrow", "箭头");
+    editor.buttons.stampOk = buildEditorButton("stamp-ok", "OK");
+    editor.buttons.stampNg = buildEditorButton("stamp-ng", "NG");
+    editor.buttons.stampProduct = buildEditorButton("stamp-product", "成品");
+    editor.buttons.zoomUnlock = buildEditorButton("zoom-unlock", "解锁缩放");
     editor.buttons.reset = buildEditorButton("reset", "图片复位");
     editor.buttons.delete = buildEditorButton("delete", "删除所选");
     editor.buttons.done = buildEditorButton("done", "完成");
@@ -2717,6 +2734,10 @@
       editor.buttons.circle,
       editor.buttons.rect,
       editor.buttons.arrow,
+      editor.buttons.stampOk,
+      editor.buttons.stampNg,
+      editor.buttons.stampProduct,
+      editor.buttons.zoomUnlock,
       editor.buttons.reset,
       editor.buttons.delete,
       editor.buttons.done
@@ -2727,7 +2748,7 @@
     document.body.appendChild(overlay);
 
     Object.entries(editor.buttons).forEach(([action, button]) => {
-      button.addEventListener("click", () => handleEditorCommand(action));
+      button.addEventListener("click", () => handleEditorCommand(button.dataset.editorAction || action));
     });
     fontSizeInput.addEventListener("input", () => handleEditorFontSizeChange(fontSizeInput.value));
     fontSizeInput.addEventListener("change", () => updateEditorFontSizeControlFromSelection());
@@ -2991,7 +3012,7 @@
   function getMaterialFieldPrefix(field) {
     if (field === "name") return "物料名称：";
     if (field === "number") return "物料编号：";
-    if (field === "spec") return "规格数量：";
+    if (field === "spec") return "规格/数量：";
     return "";
   }
 
@@ -3006,14 +3027,23 @@
       addEditorText(action);
       return;
     }
+    if (STAMP_TYPES.has(action)) {
+      addEditorStamp(action);
+      return;
+    }
     if (["circle", "rect", "arrow"].includes(action)) {
       addEditorAnnotation(action);
+      return;
+    }
+    if (action === "zoom-unlock") {
+      toggleEditorImageUnderfill();
       return;
     }
     if (action === "reset") {
       resetImageCover(editor.slot);
       renderSlotImage(editor.slot);
       renderEditorImage();
+      updateEditorButtons();
       return;
     }
     if (action === "delete") {
@@ -3067,6 +3097,17 @@
     if (slot && document.contains(slot)) {
       activateImageSlot(slot);
     }
+    markDirty();
+  }
+
+  function toggleEditorImageUnderfill() {
+    if (!editor.isOpen || !editor.slot || isLogoSlot(editor.slot)) return;
+    const state = editor.slot._imageState;
+    state.allowUnderfill = !state.allowUnderfill;
+    clampImage(editor.slot);
+    renderSlotImage(editor.slot);
+    renderEditorImage();
+    updateEditorButtons();
     markDirty();
   }
 
@@ -3172,6 +3213,7 @@
     editor.slot._textModels.forEach((model) => {
       normalizeEditorTextModel(model, editor.slot);
       const isBubble = model.type === "bubble";
+      const isStamp = model.type === "stamp";
       const isSelected = editor.selected && editor.selected.kind === "text" && editor.selected.id === model.id;
 
       if (isBubble) {
@@ -3182,7 +3224,7 @@
       }
 
       const box = document.createElement("div");
-      box.className = `editor-text-box ${isBubble ? "is-bubble" : ""}`.trim();
+      box.className = `editor-text-box ${isBubble ? "is-bubble" : ""} ${isStamp ? "is-stamp" : ""}`.trim();
       box.dataset.overlayId = model.id;
       box.style.left = `${model.x * ratio}px`;
       box.style.top = `${model.y * ratio}px`;
@@ -3202,17 +3244,19 @@
 
       const content = document.createElement("div");
       content.className = "editor-text-content";
-      content.contentEditable = "true";
+      content.contentEditable = isStamp ? "false" : "true";
       content.spellcheck = false;
       content.textContent = model.text;
       content.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
         selectEditorItem("text", model.id);
       });
-      content.addEventListener("input", () => {
-        model.text = content.textContent || "";
-        renderSlotOverlays(editor.slot);
-      });
+      if (!isStamp) {
+        content.addEventListener("input", () => {
+          model.text = content.textContent || "";
+          renderSlotOverlays(editor.slot);
+        });
+      }
 
       const moveHandle = document.createElement("button");
       moveHandle.type = "button";
@@ -3258,7 +3302,12 @@
 
   function normalizeEditorTextModel(model, slot) {
     if (!model) return;
-    model.type = model.type === "bubble" ? "bubble" : "text";
+    model.type = model.type === "bubble" ? "bubble" : model.type === "stamp" ? "stamp" : "text";
+    if (model.type === "stamp") {
+      model.text = getStampLabel(model.stampType || model.text);
+      model.fontSize = normalizeGlobalTextFontSize(getTextFontSize(model), 28);
+      return;
+    }
     if (model.type !== "bubble") return;
 
     const currentFontSize = getTextFontSize(model);
@@ -3579,6 +3628,53 @@
     return roundCoordinate(clamp(nextSize, GLOBAL_TEXT_FONT_MIN, GLOBAL_TEXT_FONT_MAX));
   }
 
+  function getStampLabel(value) {
+    const text = String(value || "").trim();
+    if (STAMP_LABELS[text]) return STAMP_LABELS[text];
+    if (/^ok$/i.test(text)) return "OK";
+    if (/^ng$/i.test(text)) return "NG";
+    if (text === "成品") return "成品";
+    return "OK";
+  }
+
+  function getStampTypeFromLabel(label) {
+    const text = getStampLabel(label);
+    if (text === "NG") return "stamp-ng";
+    if (text === "成品") return "stamp-product";
+    return "stamp-ok";
+  }
+
+  function createStampTextModel(stampType, options = {}) {
+    const boundsWidth = Math.max(1, Number(options.width) || PPT_GRID_WIDTH);
+    const boundsHeight = Math.max(1, Number(options.height) || PPT_GRID_HEIGHT);
+    const label = getStampLabel(stampType);
+    const normalizedStampType = getStampTypeFromLabel(label);
+    const compact = Boolean(options.compact);
+    const boxWidth = compact ?
+      clamp(label === "成品" ? boundsWidth * 0.46 : boundsWidth * 0.36, 56, Math.max(56, boundsWidth - 12)) :
+      (label === "成品" ? 220 : 190);
+    const boxHeight = compact ?
+      clamp(boundsHeight * 0.22, 42, Math.max(42, boundsHeight - 12)) :
+      86;
+    const fontSize = compact ?
+      clamp(Math.min(boxHeight * 0.74, boxWidth / Math.max(2.1, label.length * 0.92)), 18, 64) :
+      (label === "成品" ? 56 : 72);
+
+    return {
+      id: newOverlayId(),
+      type: "stamp",
+      stampType: normalizedStampType,
+      x: roundCoordinate((boundsWidth - boxWidth) / 2),
+      y: roundCoordinate((boundsHeight - boxHeight) / 2),
+      width: roundCoordinate(boxWidth),
+      height: roundCoordinate(boxHeight),
+      text: label,
+      fontSize: roundCoordinate(fontSize),
+      customFontSize: true,
+      color: normalizeOverlayColor(options.color || DEFAULT_OVERLAY_COLOR)
+    };
+  }
+
   function addEditorAnnotationHandles(model) {
     if (model.type === "circle") {
       addSvgHandle(model.id, "radius", model.cx + model.r, model.cy, "ew-resize");
@@ -3621,6 +3717,10 @@
     const canCrop = hasSlot && !isLogoSlot(editor.slot);
     editor.buttons.crop.disabled = !canCrop;
     editor.buttons.reset.disabled = !canCrop;
+    if (editor.buttons.zoomUnlock) {
+      editor.buttons.zoomUnlock.disabled = !canCrop;
+      editor.buttons.zoomUnlock.textContent = editor.slot && editor.slot._imageState && editor.slot._imageState.allowUnderfill ? "锁定填满" : "解锁缩放";
+    }
     editor.buttons.delete.disabled = !editor.selected;
     if (editor.colorPresetList) {
       editor.colorPresetList.querySelectorAll(".preset-color-button").forEach((button) => {
@@ -3631,6 +3731,9 @@
     Object.values(editor.buttons).forEach((button) => button.classList.remove("active"));
     if (editor.mode === "crop") {
       editor.buttons.crop.classList.add("active");
+    }
+    if (editor.buttons.zoomUnlock && editor.slot && editor.slot._imageState && editor.slot._imageState.allowUnderfill) {
+      editor.buttons.zoomUnlock.classList.add("active");
     }
     editor.stage.classList.toggle("is-crop-mode", editor.mode === "crop" && canCrop);
     updateEditorColorInputFromSelection();
@@ -3666,8 +3769,8 @@
     const rect = editor.stage.getBoundingClientRect();
     const pointerX = (event.clientX - rect.left) / editor.ratio;
     const pointerY = (event.clientY - rect.top) / editor.ratio;
-    const minScale = getMinimumImageScale(slot);
-    const maxScale = minScale * 8;
+    const minScale = getEditorWheelMinimumScale(slot);
+    const maxScale = Math.max(getMinimumImageScale(slot), minScale) * 8;
     const previousScale = state.scale;
     const zoom = Math.exp(-event.deltaY * 0.001);
     const nextScale = clamp(previousScale * zoom, minScale, maxScale);
@@ -3911,6 +4014,25 @@
       textBox.focus({ preventScroll: true });
       selectTextContent(textBox);
     }
+  }
+
+  function addEditorStamp(stampType) {
+    const slot = editor.slot;
+    if (!slot) return;
+    const model = createStampTextModel(stampType, {
+      width: slot.clientWidth,
+      height: slot.clientHeight,
+      color: editor.color,
+      compact: true
+    });
+
+    slot._textModels.push(model);
+    markDirty();
+    setEditorMode("select");
+    editor.selected = { kind: "text", id: model.id };
+    renderSlotOverlays(slot);
+    renderEditorOverlays();
+    updateEditorButtons();
   }
 
   function addEditorAnnotation(type) {
@@ -4159,6 +4281,7 @@
     slot._textModels.forEach((model) => {
       normalizeEditorTextModel(model, slot);
       const isBubble = model.type === "bubble";
+      const isStamp = model.type === "stamp";
       if (isBubble) {
         textLayer.appendChild(buildBubbleShapeSvg(
           model,
@@ -4170,7 +4293,7 @@
       }
 
       const box = document.createElement("div");
-      box.className = `slot-text-box ${isBubble ? "is-bubble" : ""}`.trim();
+      box.className = `slot-text-box ${isBubble ? "is-bubble" : ""} ${isStamp ? "is-stamp" : ""}`.trim();
       box.dataset.overlayId = model.id;
       box.textContent = model.text;
       box.style.left = `${model.x}px`;
@@ -4194,6 +4317,10 @@
 
     if (action === "text" || action === "bubble") {
       addGlobalText(action);
+      return;
+    }
+    if (STAMP_TYPES.has(action)) {
+      addGlobalStamp(action);
       return;
     }
 
@@ -4266,12 +4393,14 @@
     textLayer.replaceChildren();
     page._globalTextModels.forEach((model) => {
       normalizeGlobalTextModel(model);
-      if (model.type === "bubble") {
+      const isBubble = model.type === "bubble";
+      const isStamp = model.type === "stamp";
+      if (isBubble) {
         textLayer.appendChild(buildGlobalBubbleTail(page, model));
       }
 
       const box = document.createElement("div");
-      box.className = `global-text-box ${model.type === "bubble" ? "is-bubble" : ""}`.trim();
+      box.className = `global-text-box ${isBubble ? "is-bubble" : ""} ${isStamp ? "is-stamp" : ""}`.trim();
       box.dataset.overlayId = model.id;
       box.style.left = `${model.x}px`;
       box.style.top = `${model.y}px`;
@@ -4290,17 +4419,19 @@
 
       const content = document.createElement("div");
       content.className = "global-text-content";
-      content.contentEditable = "true";
+      content.contentEditable = isStamp ? "false" : "true";
       content.spellcheck = false;
       content.textContent = model.text || "";
       content.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
         selectGlobalItem(page, "text", model.id);
       });
-      content.addEventListener("input", () => {
-        model.text = content.textContent || "";
-        markDirty();
-      });
+      if (!isStamp) {
+        content.addEventListener("input", () => {
+          model.text = content.textContent || "";
+          markDirty();
+        });
+      }
 
       const moveHandle = document.createElement("button");
       moveHandle.type = "button";
@@ -4330,6 +4461,11 @@
 
   function normalizeGlobalTextModel(model) {
     if (!model) return;
+    if (model.type === "stamp") {
+      model.text = getStampLabel(model.stampType || model.text);
+      model.fontSize = normalizeGlobalTextFontSize(getTextFontSize(model), 56);
+      return;
+    }
     if (model.type !== "bubble") return;
     const currentFontSize = getTextFontSize(model);
     const shouldUseReadableDefault = model.customFontSize !== true && currentFontSize < 22;
@@ -4575,6 +4711,24 @@
         selectTextContent(content);
       }
     });
+  }
+
+  function addGlobalStamp(stampType) {
+    const page = getCurrentPage();
+    const sheet = getGlobalSheet(page);
+    if (!page || !sheet) return;
+
+    const model = createStampTextModel(stampType, {
+      width: sheet.clientWidth,
+      height: sheet.clientHeight,
+      color: globalEditor.color,
+      compact: false
+    });
+
+    page._globalTextModels.push(model);
+    setGlobalMode("select");
+    selectGlobalItem(page, "text", model.id);
+    markDirty();
   }
 
   function addGlobalAnnotation(type) {
@@ -4857,6 +5011,116 @@
     updateGlobalEditState();
   }
 
+  function copySelectedEditorOverlay() {
+    if (!editor.isOpen || !editor.slot || !editor.selected) return false;
+    const models = editor.selected.kind === "annotation" ? editor.slot._annotationModels : editor.slot._textModels;
+    const model = findOverlayModel(models, editor.selected.id);
+    if (!model) return false;
+    overlayClipboard = {
+      kind: editor.selected.kind,
+      model: cloneModel(model)
+    };
+    return true;
+  }
+
+  function copySelectedGlobalOverlay() {
+    const selected = globalEditor.selected;
+    if (!selected) return false;
+    const page = getPageById(selected.pageId);
+    if (!page) return false;
+    const models = selected.kind === "annotation" ? page._globalAnnotationModels : page._globalTextModels;
+    const model = findOverlayModel(models, selected.id);
+    if (!model) return false;
+    overlayClipboard = {
+      kind: selected.kind,
+      model: cloneModel(model)
+    };
+    return true;
+  }
+
+  function pasteEditorOverlay() {
+    if (!editor.isOpen || !editor.slot || !overlayClipboard) return false;
+    const model = duplicateOverlayModel(overlayClipboard.model, overlayClipboard.kind, editor.slot.clientWidth, editor.slot.clientHeight);
+    if (!model) return false;
+    if (overlayClipboard.kind === "annotation") {
+      editor.slot._annotationModels.push(model);
+      selectEditorItem("annotation", model.id);
+    } else {
+      editor.slot._textModels.push(model);
+      selectEditorItem("text", model.id);
+    }
+    markDirty();
+    renderSlotOverlays(editor.slot);
+    renderEditorOverlays();
+    return true;
+  }
+
+  function pasteGlobalOverlay() {
+    if (!overlayClipboard) return false;
+    const page = getCurrentPage();
+    const sheet = getGlobalSheet(page);
+    if (!page || !sheet) return false;
+    const model = duplicateOverlayModel(overlayClipboard.model, overlayClipboard.kind, sheet.clientWidth, sheet.clientHeight);
+    if (!model) return false;
+    if (overlayClipboard.kind === "annotation") {
+      page._globalAnnotationModels.push(model);
+      selectGlobalItem(page, "annotation", model.id);
+    } else {
+      page._globalTextModels.push(model);
+      selectGlobalItem(page, "text", model.id);
+    }
+    markDirty();
+    renderGlobalPageOverlays(page);
+    return true;
+  }
+
+  function duplicateOverlayModel(source, kind, boundsWidth, boundsHeight) {
+    if (!source) return null;
+    const model = cloneModel(source);
+    model.id = newOverlayId();
+    const offset = 22;
+    if (kind === "text") {
+      model.x = roundCoordinate(clamp(Number(model.x || 0) + offset, 0, Math.max(0, boundsWidth - Number(model.width || 0))));
+      model.y = roundCoordinate(clamp(Number(model.y || 0) + offset, 0, Math.max(0, boundsHeight - Number(model.height || 0))));
+      if (model.type === "bubble") {
+        normalizeGlobalTextModel(model);
+        model.tailX = roundCoordinate(clamp(Number(model.tailX || 0) + offset, 0, boundsWidth));
+        model.tailY = roundCoordinate(clamp(Number(model.tailY || 0) + offset, 0, boundsHeight));
+      }
+      if (model.type === "stamp") {
+        model.text = getStampLabel(model.stampType || model.text);
+        model.stampType = getStampTypeFromLabel(model.text);
+      }
+      return model;
+    }
+
+    if (model.type === "circle") {
+      const r = Number(model.r || 8);
+      model.cx = roundCoordinate(clamp(Number(model.cx || 0) + offset, r, Math.max(r, boundsWidth - r)));
+      model.cy = roundCoordinate(clamp(Number(model.cy || 0) + offset, r, Math.max(r, boundsHeight - r)));
+      return model;
+    }
+    if (model.type === "rect") {
+      const width = Number(model.width || 20);
+      const height = Number(model.height || 20);
+      model.x = roundCoordinate(clamp(Number(model.x || 0) + offset, 0, Math.max(0, boundsWidth - width)));
+      model.y = roundCoordinate(clamp(Number(model.y || 0) + offset, 0, Math.max(0, boundsHeight - height)));
+      return model;
+    }
+    ensureArrowControlPoint(model);
+    const xs = [Number(model.x1 || 0), Number(model.x2 || 0), Number(model.controlX || 0)];
+    const ys = [Number(model.y1 || 0), Number(model.y2 || 0), Number(model.controlY || 0)];
+    const dx = clamp(offset, -Math.min(...xs), boundsWidth - Math.max(...xs));
+    const dy = clamp(offset, -Math.min(...ys), boundsHeight - Math.max(...ys));
+    model.x1 = roundCoordinate(Number(model.x1 || 0) + dx);
+    model.y1 = roundCoordinate(Number(model.y1 || 0) + dy);
+    model.controlX = roundCoordinate(Number(model.controlX || 0) + dx);
+    model.controlY = roundCoordinate(Number(model.controlY || 0) + dy);
+    model.x2 = roundCoordinate(Number(model.x2 || 0) + dx);
+    model.y2 = roundCoordinate(Number(model.y2 || 0) + dy);
+    return model;
+  }
+
   function globalPointToSheet(event, page) {
     const sheet = getGlobalSheet(page);
     if (!sheet) return { x: 0, y: 0 };
@@ -4915,9 +5179,7 @@
       return;
     }
 
-    const imageBlob = options.source === "clipboard" ?
-      await compressClipboardImageBlob(file, slot).catch(() => file) :
-      file;
+    const imageBlob = await compressImageBlobForSlot(file, slot).catch(() => file);
 
     await loadImageBlob(slot, imageBlob, {
       source: options.source || "file",
@@ -4928,7 +5190,8 @@
   async function loadImageSource(slot, src, options = {}) {
     if (!slot || !src) return;
     const blob = await imageSourceToBlob(src);
-    await loadImageBlob(slot, blob, {
+    const imageBlob = await compressImageBlobForSlot(blob, slot).catch(() => blob);
+    await loadImageBlob(slot, imageBlob, {
       source: options.source || "file",
       fileName: options.fileName || "",
       keepOverlays: Boolean(options.keepOverlays)
@@ -5039,6 +5302,7 @@
     }
 
     const state = slot._imageState;
+    state.allowUnderfill = false;
     state.scale = getMinimumImageScale(slot);
     const scaledWidth = state.naturalWidth * state.scale;
     const scaledHeight = state.naturalHeight * state.scale;
@@ -5090,6 +5354,15 @@
     return shouldContainImageSlot(slot) ? getContainScale(slot) : getCoverScale(slot);
   }
 
+  function getUnlockedImageScale(slot) {
+    return Math.max(0.02, getContainScale(slot) * 0.25);
+  }
+
+  function getEditorWheelMinimumScale(slot) {
+    const state = slot._imageState;
+    return state && state.allowUnderfill ? getUnlockedImageScale(slot) : getMinimumImageScale(slot);
+  }
+
   function shouldContainImageSlot(slot) {
     return Boolean(slot && slot.dataset.fit === "contain");
   }
@@ -5102,20 +5375,20 @@
     const state = slot._imageState;
     if (!state.naturalWidth || !state.naturalHeight || isLogoSlot(slot)) return;
 
-    const minScale = getMinimumImageScale(slot);
+    const minScale = state.allowUnderfill ? getUnlockedImageScale(slot) : getMinimumImageScale(slot);
     state.scale = Math.max(state.scale, minScale);
 
     const scaledWidth = state.naturalWidth * state.scale;
     const scaledHeight = state.naturalHeight * state.scale;
 
     if (scaledWidth <= slot.clientWidth) {
-      state.x = (slot.clientWidth - scaledWidth) / 2;
+      state.x = state.allowUnderfill ? clamp(state.x, 0, slot.clientWidth - scaledWidth) : (slot.clientWidth - scaledWidth) / 2;
     } else {
       state.x = clamp(state.x, slot.clientWidth - scaledWidth, 0);
     }
 
     if (scaledHeight <= slot.clientHeight) {
-      state.y = (slot.clientHeight - scaledHeight) / 2;
+      state.y = state.allowUnderfill ? clamp(state.y, 0, slot.clientHeight - scaledHeight) : (slot.clientHeight - scaledHeight) / 2;
     } else {
       state.y = clamp(state.y, slot.clientHeight - scaledHeight, 0);
     }
@@ -5365,6 +5638,14 @@
 
     if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !isTyping && !editor.isOpen) {
       const key = String(event.key || "").toLowerCase();
+      if (key === "c" && copySelectedGlobalOverlay()) {
+        event.preventDefault();
+        return;
+      }
+      if (key === "v" && overlayClipboard && pasteGlobalOverlay()) {
+        event.preventDefault();
+        return;
+      }
       if (key === "c" && copySelectedStepCard()) {
         event.preventDefault();
         return;
@@ -5395,6 +5676,18 @@
         } catch (error) {
           showFileError("粘贴物料卡片失败", error);
         }
+        return;
+      }
+    }
+
+    if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !isTyping && editor.isOpen) {
+      const key = String(event.key || "").toLowerCase();
+      if (key === "c" && copySelectedEditorOverlay()) {
+        event.preventDefault();
+        return;
+      }
+      if (key === "v" && pasteEditorOverlay()) {
+        event.preventDefault();
         return;
       }
     }
@@ -5853,6 +6146,7 @@
         naturalWidth: state.naturalWidth || 0,
         naturalHeight: state.naturalHeight || 0,
         scale: state.scale || 1,
+        allowUnderfill: Boolean(state.allowUnderfill),
         x: state.x || 0,
         y: state.y || 0
       },
@@ -5993,6 +6287,7 @@
       naturalWidth: img.naturalWidth || savedState.naturalWidth || 0,
       naturalHeight: img.naturalHeight || savedState.naturalHeight || 0,
       scale: savedState.scale || 1,
+      allowUnderfill: Boolean(savedState.allowUnderfill),
       x: savedState.x || 0,
       y: savedState.y || 0,
       dragging: false,
@@ -6026,6 +6321,7 @@
         naturalWidth: savedState.naturalWidth || 0,
         naturalHeight: savedState.naturalHeight || 0,
         scale: savedState.scale || 1,
+        allowUnderfill: Boolean(savedState.allowUnderfill),
         x: savedState.x || 0,
         y: savedState.y || 0,
         dragging: false,
@@ -6053,6 +6349,7 @@
       naturalWidth: img.naturalWidth || savedState.naturalWidth || 0,
       naturalHeight: img.naturalHeight || savedState.naturalHeight || 0,
       scale: savedState.scale || 1,
+      allowUnderfill: Boolean(savedState.allowUnderfill),
       x: savedState.x || 0,
       y: savedState.y || 0,
       dragging: false,
@@ -6321,53 +6618,61 @@
     });
   }
 
-  async function compressClipboardImageBlob(blob, slot) {
+  async function compressImageBlobForSlot(blob, slot) {
     if (!blob || !ALLOWED_ASSET_IMAGE_MIMES.has(normalizeAssetMime(blob.type))) return blob;
 
-    const options = getClipboardCompressionOptions(slot);
-    const image = await loadImageElementFromBlob(blob);
-    const sourceWidth = image.naturalWidth || 1;
-    const sourceHeight = image.naturalHeight || 1;
-    let scale = Math.min(1, options.maxSide / Math.max(sourceWidth, sourceHeight));
-    let bestBlob = blob;
+    const options = getImageCompressionOptions(slot);
+    const loaded = await loadDrawableImageElementFromBlob(blob);
+    try {
+      const image = loaded.image;
+      const sourceWidth = image.naturalWidth || 1;
+      const sourceHeight = image.naturalHeight || 1;
+      const sourceMaxSide = Math.max(sourceWidth, sourceHeight);
+      let scale = Math.min(1, options.maxSide / sourceMaxSide);
+      const sourceWithinLimits = sourceMaxSide <= options.maxSide && blob.size <= options.targetBytes;
+      if (sourceWithinLimits) return blob;
+      let bestBlob = sourceMaxSide <= options.maxSide ? blob : null;
 
-    for (let resizePass = 0; resizePass < 7; resizePass += 1) {
-      const width = Math.max(1, Math.round(sourceWidth * scale));
-      const height = Math.max(1, Math.round(sourceHeight * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d", { alpha: true });
-      if (!ctx) return bestBlob;
-      ctx.drawImage(image, 0, 0, width, height);
+      for (let resizePass = 0; resizePass < 7; resizePass += 1) {
+        const width = Math.max(1, Math.round(sourceWidth * scale));
+        const height = Math.max(1, Math.round(sourceHeight * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d", { alpha: true });
+        if (!ctx) return bestBlob || blob;
+        ctx.drawImage(image, 0, 0, width, height);
 
-      const encoded = await encodeCanvasWithinTarget(canvas, options.targetBytes);
-      if (encoded && encoded.size < bestBlob.size) {
-        bestBlob = encoded;
+        const encoded = await encodeCanvasWithinTarget(canvas, options.targetBytes);
+        if (encoded && (!bestBlob || encoded.size < bestBlob.size)) {
+          bestBlob = encoded;
+        }
+        if (encoded && encoded.size <= options.targetBytes) {
+          return encoded;
+        }
+
+        if (Math.max(width, height) <= options.minSide) break;
+        const ratio = encoded && encoded.size ? Math.sqrt(options.targetBytes / encoded.size) : 0.85;
+        scale = Math.max(options.minSide / sourceMaxSide, scale * clamp(ratio * 0.92, 0.68, 0.9));
       }
-      if (encoded && encoded.size <= options.targetBytes) {
-        return encoded;
-      }
 
-      if (Math.max(width, height) <= options.minSide) break;
-      const ratio = encoded && encoded.size ? Math.sqrt(options.targetBytes / encoded.size) : 0.85;
-      scale = Math.max(options.minSide / Math.max(sourceWidth, sourceHeight), scale * clamp(ratio * 0.92, 0.68, 0.9));
+      return bestBlob || blob;
+    } finally {
+      loaded.cleanup();
     }
-
-    return bestBlob;
   }
 
-  function getClipboardCompressionOptions(slot) {
+  function getImageCompressionOptions(slot) {
     const isMaterial = Boolean(slot && slot.dataset && slot.dataset.material === "true");
     return {
-      targetBytes: isMaterial ? CLIPBOARD_MATERIAL_IMAGE_TARGET_BYTES : CLIPBOARD_DEFAULT_IMAGE_TARGET_BYTES,
-      maxSide: isMaterial ? CLIPBOARD_MATERIAL_IMAGE_MAX_SIDE : CLIPBOARD_DEFAULT_IMAGE_MAX_SIDE,
-      minSide: isMaterial ? 480 : 720
+      targetBytes: isMaterial ? MATERIAL_IMAGE_TARGET_BYTES : DEFAULT_IMAGE_TARGET_BYTES,
+      maxSide: isMaterial ? MATERIAL_IMAGE_MAX_SIDE : DEFAULT_IMAGE_MAX_SIDE,
+      minSide: isMaterial ? 180 : 360
     };
   }
 
   async function encodeCanvasWithinTarget(canvas, targetBytes) {
-    const qualities = [0.82, 0.72, 0.62, 0.52, 0.44, 0.36, 0.28];
+    const qualities = [0.82, 0.72, 0.62, 0.52, 0.44, 0.36, 0.28, 0.2, 0.14, 0.1];
     let bestBlob = null;
     for (const quality of qualities) {
       const blob = await canvasToBlob(canvas, "image/webp", quality);
@@ -6405,6 +6710,25 @@
       img.onerror = () => {
         cleanup();
         reject(new Error("图片读取失败，请重新复制后粘贴。"));
+      };
+      img.src = url;
+    });
+  }
+
+  function loadDrawableImageElementFromBlob(blob) {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.decoding = "async";
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        URL.revokeObjectURL(url);
+        img.onload = null;
+        img.onerror = null;
+      };
+      img.onload = () => resolve({ image: img, cleanup });
+      img.onerror = () => {
+        cleanup();
+        reject(new Error("图片读取失败，请重新插入图片。"));
       };
       img.src = url;
     });
@@ -8372,7 +8696,7 @@
       `已识别 ${bom.items.length} 个物料；如需自动填图，BOM中需包含图片链接、base64图片或xlsx内嵌图片。`;
     bomPreviewTable.replaceChildren();
 
-    const headers = bom.headers && bom.headers.length ? bom.headers : ["物料编号", "物料名称", "规格数量", "图片"];
+    const headers = bom.headers && bom.headers.length ? bom.headers : ["物料编号", "物料名称", "规格/数量", "图片"];
     const thead = document.createElement("thead");
     const headRow = document.createElement("tr");
     headers.forEach((header) => {
@@ -8505,7 +8829,10 @@
         id: `bom-${sourceRowIndex}-${code}`,
         code,
         name: cleanCellText(row[headerInfo.nameCol]),
-        spec: cleanCellText(row[headerInfo.specCol]),
+        spec: formatBomSpecQuantity(
+          cleanCellText(row[headerInfo.specCol]),
+          cleanCellText(row[headerInfo.quantityCol])
+        ),
         imageSrc,
         rowIndex: sourceRowIndex,
         cells: row
@@ -8563,11 +8890,17 @@
       /description/i
     ], codeCol === 0 ? 1 : 0);
     const specCol = findBomColumn(headers, [
+      /规格\s*[\/／]\s*数量/,
+      /规格数量/,
       /规格/,
       /型号/,
-      /数量/,
-      /规格数量/,
       /spec/i,
+      /model/i
+    ], -1);
+    const quantityCol = findBomColumn(headers, [
+      /^数量$/,
+      /用量/,
+      /需求数量/,
       /qty/i,
       /quantity/i
     ], -1);
@@ -8581,7 +8914,7 @@
       /url/i
     ], -1);
 
-    return { headerIndex: best.headerIndex, codeCol, nameCol, specCol, imageCol };
+    return { headerIndex: best.headerIndex, codeCol, nameCol, specCol, quantityCol, imageCol };
   }
 
   function scoreBomHeaderCell(value) {
@@ -8601,6 +8934,13 @@
       return patterns.some((pattern) => pattern.test(raw) || pattern.test(normalized));
     });
     return index >= 0 ? index : fallback;
+  }
+
+  function formatBomSpecQuantity(spec, quantity) {
+    const cleanSpec = cleanCellText(spec);
+    const cleanQuantity = cleanCellText(quantity);
+    if (cleanSpec && cleanQuantity) return `${cleanSpec}/${cleanQuantity}`;
+    return cleanSpec || cleanQuantity || "";
   }
 
   function parseDelimitedText(text, delimiter) {
@@ -8812,9 +9152,35 @@
         await delay(120);
         return prevented;
       };
+      const createCompressionTestBlob = async () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = 2400;
+        canvas.height = 1600;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("selftest canvas unavailable");
+        const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        gradient.addColorStop(0, "#0f172a");
+        gradient.addColorStop(0.5, "#ef4444");
+        gradient.addColorStop(1, "#f8fafc");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < 160; i += 1) {
+          ctx.strokeStyle = `rgba(${(i * 17) % 255}, ${(i * 31) % 255}, ${(i * 47) % 255}, 0.72)`;
+          ctx.lineWidth = 5 + (i % 9);
+          ctx.beginPath();
+          ctx.moveTo((i * 37) % canvas.width, 0);
+          ctx.lineTo(canvas.width - ((i * 19) % canvas.width), canvas.height);
+          ctx.stroke();
+        }
+        return await canvasToBlob(canvas, "image/png", 0.92);
+      };
+      const getSlotAssetRecord = (slot) => {
+        const assetId = slot && slot.dataset ? slot.dataset.assetId : "";
+        return assetId ? projectState.assets[assetId] : null;
+      };
       const csv = [
-        "物料编号,物料名称,规格数量,图片",
-        `MAT-001,测试物料,2PCS,"${imageData}"`
+        "物料编号,物料名称,规格,数量,图片",
+        `MAT-001,测试物料,TEST-SPEC,2PCS,"${imageData}"`
       ].join("\n");
       const file = new File([csv], "selftest-bom.csv", { type: "text/csv" });
       const parsed = await parseBomFile(file);
@@ -9044,6 +9410,25 @@
         materialMoveRedoPassed;
       document.body.dataset.selftestStep = "material-card";
 
+      const compressionBlob = await createCompressionTestBlob();
+      await loadImageFile(sourceMaterialImage, new File([compressionBlob], "selftest-material-large.png", { type: "image/png" }));
+      await waitImageReady(sourceMaterialImage.querySelector("img"));
+      await loadImageFile(sourceStepImage, new File([compressionBlob], "selftest-step-large.png", { type: "image/png" }));
+      await waitImageReady(sourceStepImage.querySelector("img"));
+      await nextFrame();
+      const compressedMaterialAsset = getSlotAssetRecord(sourceMaterialImage);
+      const compressedStepAsset = getSlotAssetRecord(sourceStepImage);
+      const compressionPassed = Boolean(
+        compressedMaterialAsset &&
+        compressedMaterialAsset.byteSize <= MATERIAL_IMAGE_TARGET_BYTES &&
+        Math.max(compressedMaterialAsset.width || 0, compressedMaterialAsset.height || 0) <= MATERIAL_IMAGE_MAX_SIDE &&
+        compressedStepAsset &&
+        compressedStepAsset.byteSize <= DEFAULT_IMAGE_TARGET_BYTES &&
+        Math.max(compressedStepAsset.width || 0, compressedStepAsset.height || 0) <= DEFAULT_IMAGE_MAX_SIDE
+      );
+      const compressionDetails = `M:${compressedMaterialAsset ? `${compressedMaterialAsset.byteSize}/${compressedMaterialAsset.width}x${compressedMaterialAsset.height}` : "none"} S:${compressedStepAsset ? `${compressedStepAsset.byteSize}/${compressedStepAsset.width}x${compressedStepAsset.height}` : "none"}`;
+      document.body.dataset.selftestStep = "image-compression";
+
       const logoSlot = getGlobalInfoLogoSlotFromPage(stepPage);
       await loadImageSource(logoSlot, imageData);
       await waitImageReady(logoSlot.querySelector("img"));
@@ -9069,7 +9454,7 @@
       const bomImageSlot = bomPageNow.querySelector(".image-cell[data-material-index='0']");
       const bomPassed = getMaterialFieldValue(bomNumberCell, "number") === "MAT-001" &&
         getMaterialFieldValue(bomNameCell, "name") === "测试物料" &&
-        getMaterialFieldValue(bomSpecCell, "spec") === "2PCS" &&
+        getMaterialFieldValue(bomSpecCell, "spec") === "TEST-SPEC/2PCS" &&
         bomImageSlot.dataset.hasImage === "true" &&
         bomPreviewPanel.hidden === false &&
         appShellEl.classList.contains("bom-preview-open");
@@ -9082,29 +9467,33 @@
       const packageManifestText = await packageZip.file(SOP_PACKAGE_MANIFEST_PATH).async("text");
       const packageDocument = JSON.parse(packageDocumentText);
       const packageManifest = JSON.parse(packageManifestText);
-      const packageAssetPaths = assetIds.map((assetId) => packageDocument.assets[assetId] && packageDocument.assets[assetId].path);
+      const packagedAssetIds = Object.keys(packageDocument.assets || {});
+      const packageAssetPaths = packagedAssetIds.map((assetId) => packageDocument.assets[assetId] && packageDocument.assets[assetId].path);
+      const packageAssetsWithThumbs = Object.values(packageDocument.assets || {}).filter((asset) => asset.path && asset.thumbnailPath).length;
+      const packageContainsBase64 = containsEmbeddedBase64(packageDocumentText);
       const packagePassed = Boolean(
-        assetIds.length === 1 &&
+        packagedAssetIds.length >= 1 &&
         packageZip.file(SOP_PACKAGE_DOCUMENT_PATH) &&
         packageZip.file(SOP_PACKAGE_MANIFEST_PATH) &&
         packageManifest.fileType === SOP_PACKAGE_FILE_TYPE &&
         packageAssetPaths.every((path) => path && packageZip.file(path)) &&
-        !containsEmbeddedBase64(packageDocumentText) &&
+        !packageContainsBase64 &&
         Object.values(packageDocument.assets || {}).every((asset) => asset.path && asset.thumbnailPath)
       );
       const importedPackage = await importSopPackageFromFile(new File([packageBlob], "selftest.sopzip", { type: "application/zip" }));
       const importPassed = Boolean(
         importedPackage &&
         importedPackage.fileType === SOP_FILE_TYPE &&
-        Object.keys(importedPackage.assets || {}).length === assetIds.length &&
+        Object.keys(importedPackage.assets || {}).length === packagedAssetIds.length &&
         Array.isArray(importedPackage.pages) &&
         importedPackage.pages.length === packageProject.pages.length
       );
+      const packageDetails = `PKG:${assetIds.length}->${packagedAssetIds.length}/${packageAssetPaths.filter((path) => path && packageZip.file(path)).length}/${packageAssetsWithThumbs} B64:${packageContainsBase64} IMP:${importedPackage && importedPackage.assets ? Object.keys(importedPackage.assets).length : "none"}`;
       document.body.dataset.selftestStep = "sopzip-import";
-      const passed = bomPassed && stepCardPassed && materialCardPassed && logoPassed && packagePassed && importPassed;
+      const passed = bomPassed && stepCardPassed && materialCardPassed && compressionPassed && logoPassed && packagePassed && importPassed;
       document.body.dataset.selftest = passed ? "pass" : "fail";
       if (!passed) {
-        document.body.dataset.selftestError = `BOM:${bomPassed} STEP_CARD:${stepCardPassed} MATERIAL_CARD:${materialCardPassed} LOGO:${logoPassed} PACKAGE:${packagePassed} IMPORT:${importPassed}`;
+        document.body.dataset.selftestError = `BOM:${bomPassed} STEP_CARD:${stepCardPassed} MATERIAL_CARD:${materialCardPassed} COMPRESSION:${compressionPassed} ${compressionDetails} LOGO:${logoPassed} PACKAGE:${packagePassed} IMPORT:${importPassed} ${packageDetails}`;
       }
     } catch (error) {
       document.body.dataset.selftest = "fail";
