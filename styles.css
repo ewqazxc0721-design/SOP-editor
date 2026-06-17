@@ -815,6 +815,27 @@ button {
   gap: 8px;
 }
 
+.global-info-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 7px 8px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #d7dee9;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.global-info-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #2563eb;
+}
+
 .global-info-status {
   min-height: 30px;
   padding: 7px 8px;
@@ -1468,6 +1489,26 @@ button {
 .material-label {
   background: #fff;
   font-size: 12px;
+}
+
+.material-area-text-cell {
+  align-items: flex-start;
+  padding: 10px 12px;
+  background: #fff;
+  font-size: 14px;
+  line-height: 1.45;
+  overflow: hidden;
+}
+
+.material-area-text-cell[contenteditable="true"]:empty::before {
+  content: "在此填写左侧区域说明";
+  color: #64748b;
+  pointer-events: none;
+}
+
+.sop-page:not(.material-table-disabled) .material-area-text-cell,
+.sop-page.material-table-disabled .material-table-cell {
+  display: none;
 }
 
 .blank-cell {

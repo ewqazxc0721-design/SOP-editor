@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SOP模板编辑器</title>
-  <link rel="stylesheet" href="./styles.css?v=1.8.5">
+  <link rel="stylesheet" href="./styles.css?v=1.8.6">
 </head>
 <body>
   <main class="app-shell">
@@ -130,6 +130,10 @@
             <input id="global-info-approver" type="text" data-global-info-key="approver">
           </label>
         </div>
+        <label class="global-info-toggle">
+          <input id="global-info-material-table-enabled" type="checkbox" checked>
+          <span>启用零件物料/治具表</span>
+        </label>
         <div class="global-info-logo-field">
           <div class="global-info-logo-header">
             <span>Logo图片</span>
@@ -210,6 +214,6 @@
 
   <script src="./vendor/xlsx.full.min.js"></script>
   <script src="./vendor/jszip.min.js"></script>
-  <script src="./app.js?v=1.8.5"></script>
+  <script src="./app.js?v=1.8.6"></script>
 </body>
 </html>

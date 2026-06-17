@@ -38,6 +38,7 @@
   const globalInfoLogoChooseButton = document.getElementById("global-info-logo-choose");
   const globalInfoLogoDeleteButton = document.getElementById("global-info-logo-delete");
   const globalInfoLogoPreview = document.getElementById("global-info-logo-preview");
+  const globalInfoMaterialTableToggle = document.getElementById("global-info-material-table-enabled");
   let globalInfoPanelToggle = null;
   let globalInfoPanelBody = null;
   const openProjectInput = document.getElementById("open-project-input");
@@ -87,7 +88,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.8.5";
+  const APP_VERSION = "1.8.6";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -100,6 +101,9 @@
   const CLIPBOARD_DEFAULT_IMAGE_TARGET_BYTES = 220 * 1024;
   const CLIPBOARD_MATERIAL_IMAGE_MAX_SIDE = 1000;
   const CLIPBOARD_DEFAULT_IMAGE_MAX_SIDE = 1600;
+  const MATERIAL_AREA_TEXT_CELL_KEY = "materialAreaText";
+  const MATERIAL_TABLE_MODE = "table";
+  const MATERIAL_TEXT_MODE = "text";
   const ALLOWED_ASSET_IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp"]);
   const DEFAULT_OVERLAY_COLOR = "#ef1d1d";
   const PRESET_OVERLAY_COLORS = [
@@ -336,7 +340,14 @@
       fit: "contain",
       accept: ".ai,.eps,.pdf,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp,application/pdf,application/postscript,application/illustrator"
     }),
-    textCell(1, 2, 4, 1, "零件物料/治具", "section-title"),
+    textCell(1, 2, 4, 1, "零件物料/治具", "section-title material-table-cell", {
+      materialArea: MATERIAL_TABLE_MODE
+    }),
+    textCell(1, 2, 4, 25, "", "material-area-text-cell left", {
+      editable: true,
+      cellKey: MATERIAL_AREA_TEXT_CELL_KEY,
+      materialArea: MATERIAL_TEXT_MODE
+    }),
 
     imageCell(5, 2, 3, 9),
     imageCell(8, 2, 3, 9),
@@ -414,21 +425,25 @@
     templateCells.push(imageCell(1, row, 2, 3, {
       material: true,
       materialIndex: index,
-      label: `${number}\n插入物料图片`
+      label: `${number}\n插入物料图片`,
+      materialArea: MATERIAL_TABLE_MODE
     }));
-    templateCells.push(textCell(3, row, 2, 1, "物料名称：", "material-label left", {
+    templateCells.push(textCell(3, row, 2, 1, "物料名称：", "material-label left material-table-cell", {
       materialIndex: index,
       materialField: "name",
+      materialArea: MATERIAL_TABLE_MODE,
       fields: [{ key: "value", label: "物料名称：", grow: true, minChars: 6 }]
     }));
-    templateCells.push(textCell(3, row + 1, 2, 1, "物料编号：", "material-label left", {
+    templateCells.push(textCell(3, row + 1, 2, 1, "物料编号：", "material-label left material-table-cell", {
       materialIndex: index,
       materialField: "number",
+      materialArea: MATERIAL_TABLE_MODE,
       fields: [{ key: "value", label: "物料编号：", grow: true, minChars: 6 }]
     }));
-    templateCells.push(textCell(3, row + 2, 2, 1, "规格数量：", "material-label left", {
+    templateCells.push(textCell(3, row + 2, 2, 1, "规格数量：", "material-label left material-table-cell", {
       materialIndex: index,
       materialField: "spec",
+      materialArea: MATERIAL_TABLE_MODE,
       fields: [{ key: "value", label: "规格数量：", grow: true, minChars: 6 }]
     }));
   });
@@ -509,6 +524,13 @@
         await loadGlobalInfoLogoFile(file);
       } catch (error) {
         showFileError("插入全局Logo失败", error);
+      }
+    });
+  }
+  if (globalInfoMaterialTableToggle) {
+    globalInfoMaterialTableToggle.addEventListener("change", () => {
+      if (globalInfoStatusEl) {
+        globalInfoStatusEl.textContent = "未同步，点击保存并同步";
       }
     });
   }
@@ -653,6 +675,7 @@
       fields: normalizeTextCellFields(options.fields),
       materialIndex: Number.isInteger(options.materialIndex) ? options.materialIndex : null,
       materialField: options.materialField || "",
+      materialArea: options.materialArea || "",
       cellKey: options.cellKey || `c${col}r${row}`
     };
   }
@@ -683,6 +706,7 @@
       fit: options.fit || (options.material ? "contain" : "cover"),
       accept: options.accept || ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp",
       label: options.label || "插入图片",
+      materialArea: options.materialArea || "",
       cellKey: options.cellKey || `c${col}r${row}`
     };
   }
@@ -723,7 +747,8 @@
   function addPage(options = {}) {
     const page = buildPage(nextPageId++, {
       stepTemplateCount: options.stepTemplateCount,
-      stepCards: options.stepCards
+      stepCards: options.stepCards,
+      materialTableEnabled: normalizeGlobalInfo(projectState.globalInfo).materialTableEnabled
     });
     pagesEl.appendChild(page);
     if (hasGlobalInfoValues()) {
@@ -743,6 +768,7 @@
     page.className = "sop-page";
     page.dataset.pageId = String(pageId);
     page.dataset.stepTemplateCount = String(stepTemplateCount);
+    applyMaterialAreaModeToPage(page, options.materialTableEnabled !== false);
     page._globalAnnotationModels = [];
     page._globalTextModels = [];
     if (isFreeStepTemplateCount(stepTemplateCount)) {
@@ -786,12 +812,30 @@
     return normalizeStepTemplateCount(pageData && pageData.stepTemplateCount);
   }
 
+  function getPageDataMaterialTableEnabled(pageData, globalInfo = projectState.globalInfo) {
+    if (pageData && typeof pageData.materialTableEnabled === "boolean") {
+      return pageData.materialTableEnabled;
+    }
+    return normalizeGlobalInfo(globalInfo).materialTableEnabled !== false;
+  }
+
   function isFreeStepTemplateCount(stepTemplateCount) {
     return normalizeStepTemplateCount(stepTemplateCount) === FREE_STEP_TEMPLATE_COUNT;
   }
 
   function isFreeStepPage(page) {
     return Boolean(page && isFreeStepTemplateCount(getPageStepTemplateCount(page)));
+  }
+
+  function isMaterialTableEnabledForPage(page) {
+    return !(page && page.dataset && page.dataset.materialTableEnabled === "false");
+  }
+
+  function applyMaterialAreaModeToPage(page, enabled = true) {
+    if (!page) return;
+    const nextEnabled = enabled !== false;
+    page.dataset.materialTableEnabled = String(nextEnabled);
+    page.classList.toggle("material-table-disabled", !nextEnabled);
   }
 
   function getBaseTemplateCells() {
@@ -1995,6 +2039,9 @@
     const cell = document.createElement("div");
     cell.className = `sop-cell text-cell ${definition.className || ""}`.trim();
     cell.dataset.cellKey = definition.cellKey;
+    if (definition.materialArea) {
+      cell.dataset.materialArea = definition.materialArea;
+    }
     if (definition.materialField) {
       cell.dataset.materialField = definition.materialField;
       cell.dataset.materialIndex = String(definition.materialIndex);
@@ -2068,6 +2115,7 @@
       return result;
     }, {});
     values.logoSlot = null;
+    values.materialTableEnabled = true;
     return values;
   }
 
@@ -2078,13 +2126,15 @@
       normalized[field.key] = String(source[field.key] || "");
     });
     normalized.logoSlot = normalizeGlobalLogoSlot(source.logoSlot);
+    normalized.materialTableEnabled = source.materialTableEnabled !== false;
     return normalized;
   }
 
   function hasGlobalInfoValues(info = projectState.globalInfo) {
     const normalized = normalizeGlobalInfo(info);
     return GLOBAL_INFO_FIELDS.some((field) => String(normalized[field.key] || "").trim() !== "") ||
-      Boolean(normalized.logoSlot);
+      Boolean(normalized.logoSlot) ||
+      normalized.materialTableEnabled === false;
   }
 
   function readGlobalInfoFromControls() {
@@ -2093,6 +2143,7 @@
       values[input.dataset.globalInfoKey] = input.value || "";
     });
     values.logoSlot = normalizeGlobalLogoSlot(globalInfoLogoSlot);
+    values.materialTableEnabled = globalInfoMaterialTableToggle ? globalInfoMaterialTableToggle.checked : true;
     return values;
   }
 
@@ -2101,6 +2152,9 @@
     globalInfoInputs.forEach((input) => {
       input.value = normalized[input.dataset.globalInfoKey] || "";
     });
+    if (globalInfoMaterialTableToggle) {
+      globalInfoMaterialTableToggle.checked = normalized.materialTableEnabled !== false;
+    }
     setGlobalInfoLogoSlot(normalized.logoSlot, { silent: true });
     if (globalInfoStatusEl) {
       globalInfoStatusEl.textContent = "仅保存在当前 SOP 中";
@@ -2116,6 +2170,7 @@
     });
     const logoSlot = getGlobalInfoLogoSlotFromPage(page);
     values.logoSlot = logoSlot && logoSlot.dataset.hasImage === "true" ? serializeImageSlot(logoSlot) : null;
+    values.materialTableEnabled = isMaterialTableEnabledForPage(page);
     return values;
   }
 
@@ -2143,6 +2198,7 @@
     GLOBAL_INFO_FIELDS.forEach((field) => {
       setGlobalInfoField(page, field, normalized[field.key]);
     });
+    applyMaterialAreaModeToPage(page, normalized.materialTableEnabled !== false);
     await setGlobalInfoLogoForPage(page, normalized.logoSlot);
   }
 
@@ -2395,6 +2451,12 @@
     slot.dataset.fit = definition.fit;
     slot.dataset.mediaKind = "empty";
     slot.dataset.cellKey = definition.cellKey;
+    if (definition.materialArea) {
+      slot.dataset.materialArea = definition.materialArea;
+      if (definition.materialArea === MATERIAL_TABLE_MODE) {
+        slot.classList.add("material-table-cell");
+      }
+    }
     if (definition.material) {
       slot.dataset.material = "true";
       slot.dataset.materialIndex = String(definition.materialIndex);
@@ -5742,6 +5804,7 @@
       const pageData = {
         pageNumber: Number(page.dataset.pageNumber) || 0,
         stepTemplateCount: getPageStepTemplateCount(page),
+        materialTableEnabled: isMaterialTableEnabledForPage(page),
         textCells: getEditableTextCells(page).map(serializeTextCell),
         imageSlots: Array.from(page.querySelectorAll(".image-cell")).map(serializeImageSlot),
         globalAnnotations: (page._globalAnnotationModels || []).map(cloneModel),
@@ -5841,7 +5904,8 @@
       for (const pageData of safePages) {
         const page = buildPage(nextPageId++, {
           stepTemplateCount: getPageDataStepTemplateCount(pageData),
-          stepCards: pageData && pageData.stepCards
+          stepCards: pageData && pageData.stepCards,
+          materialTableEnabled: normalizeGlobalInfo(projectState.globalInfo).materialTableEnabled
         });
         pagesEl.appendChild(page);
         await applyPageData(page, pageData);
@@ -9985,7 +10049,7 @@
     const slideInfos = [];
 
     pages.forEach((pageData, index) => {
-      const slide = buildPptxSlide(pageData || {}, index + 1, pages.length, media);
+      const slide = buildPptxSlide(pageData || {}, index + 1, pages.length, media, project.document && project.document.globalInfo);
       slideInfos.push(slide);
     });
 
@@ -9997,7 +10061,7 @@
     });
   }
 
-  function buildPptxSlide(pageData, pageNumber, pageTotal, media) {
+  function buildPptxSlide(pageData, pageNumber, pageTotal, media, globalInfo = {}) {
     const rels = [{ id: "rId1", type: "slideLayout", target: "../slideLayouts/slideLayout1.xml" }];
     let relIndex = 2;
     let shapeId = 2;
@@ -10011,7 +10075,7 @@
     let editableIndex = 0;
     let imageIndex = 0;
 
-    const definitions = getPptPageDefinitions(pageData, freeStepCards);
+    const definitions = getPptPageDefinitions(pageData, freeStepCards, globalInfo);
     definitions.forEach((definition) => {
       const box = getPptCellBox(definition);
       if (definition.kind === "image") {
@@ -10068,9 +10132,14 @@
     });
   }
 
-  function getPptPageDefinitions(pageData, freeStepCards) {
+  function getPptPageDefinitions(pageData, freeStepCards, globalInfo = {}) {
     const count = getPageDataStepTemplateCount(pageData);
-    const definitions = getTemplateCells(count).slice();
+    const materialTableEnabled = getPageDataMaterialTableEnabled(pageData, globalInfo);
+    const definitions = getTemplateCells(count).filter((definition) => {
+      if (definition.materialArea === MATERIAL_TABLE_MODE) return materialTableEnabled;
+      if (definition.materialArea === MATERIAL_TEXT_MODE) return !materialTableEnabled;
+      return true;
+    });
     if (isFreeStepTemplateCount(count)) {
       const layout = layoutFreeStepCards(freeStepCards || []);
       if (layout.ok) {
@@ -10949,7 +11018,8 @@
         const pageData = pagesData[index] || {};
         const page = buildPage(nextPageId++, {
           stepTemplateCount: getPageDataStepTemplateCount(pageData),
-          stepCards: pageData.stepCards
+          stepCards: pageData.stepCards,
+          materialTableEnabled: normalizeGlobalInfo(documentItem.project && documentItem.project.document && documentItem.project.document.globalInfo).materialTableEnabled
         });
         page.dataset.batchDocumentId = documentItem.documentId || "";
         page.dataset.batchFileName = documentItem.name || "";
