@@ -94,7 +94,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.9.8";
+  const APP_VERSION = "1.10.0";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -168,7 +168,7 @@
   const STORAGE_MODE_FEISHU = "feishu";
   const BOM_HISTORY_LIMIT = 12;
   const GLOBAL_INFO_FIELDS = [
-    { key: "productName", cellKey: "c1r1", fieldKey: "value" },
+    { key: "productName", cellKey: "c4r1", fieldKey: "value" },
     { key: "sopNumber", cellKey: "c1r27", fieldKey: "sopNumber" },
     { key: "version", cellKey: "c1r27", fieldKey: "version" },
     { key: "date", cellKey: "c1r27", fieldKey: "date" },
@@ -176,7 +176,7 @@
     { key: "reviewer", cellKey: "c11r27", fieldKey: "value" },
     { key: "approver", cellKey: "c14r27", fieldKey: "value" }
   ];
-  const GLOBAL_INFO_LOGO_CELL_KEY = "c14r1";
+  const GLOBAL_INFO_LOGO_CELL_KEY = "c1r1";
   const displayableImageExtensions = [".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif", ".bmp", ".ico"];
   const logoSourceExtensions = [".ai", ".eps", ".pdf"];
   const bomFileExtensions = [".xlsx", ".xls", ".csv", ".tsv", ".txt", ".json"];
@@ -352,20 +352,20 @@
   };
 
   const templateCells = [
-    textCell(1, 1, 4, 1, "  产品名称/编号：", "header-cell left", {
-      fields: [{ key: "value", label: "  产品名称/编号：", grow: true, minChars: 8 }]
-    }),
-    textCell(5, 1, 5, 1, "  工序：", "header-cell left", {
-      fields: [{ key: "value", label: "  工序：", grow: true, minChars: 8 }]
-    }),
-    textCell(10, 1, 4, 1, "  组装模块：", "header-cell left", {
-      fields: [{ key: "value", label: "  组装模块：", grow: true, minChars: 8 }]
-    }),
-    imageCell(14, 1, 3, 1, {
+    imageCell(1, 1, 3, 1, {
       logo: true,
       label: "插入logo",
       fit: "contain",
       accept: ".ai,.eps,.pdf,.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp,application/pdf,application/postscript,application/illustrator"
+    }),
+    textCell(4, 1, 4, 1, "  产品名称/编号：", "header-cell left", {
+      fields: [{ key: "value", label: "  产品名称/编号：", grow: true, minChars: 8 }]
+    }),
+    textCell(8, 1, 5, 1, "  工序：", "header-cell left", {
+      fields: [{ key: "value", label: "  工序：", grow: true, minChars: 8 }]
+    }),
+    textCell(13, 1, 4, 1, "  组装模块：", "header-cell left", {
+      fields: [{ key: "value", label: "  组装模块：", grow: true, minChars: 8 }]
     }),
     textCell(1, 2, 4, 1, "零件物料/治具", "section-title material-table-cell", {
       materialArea: MATERIAL_TABLE_MODE
@@ -5537,6 +5537,11 @@
     const imageItem = getPreferredClipboardImageItem(clipboard);
     if (!imageItem) return;
 
+    if (!editor.isOpen && isStepDescriptionPasteArea(event.target)) {
+      event.preventDefault();
+      return;
+    }
+
     const slot = editor.isOpen ? editor.slot : getPasteTarget(event.target);
     if (!slot) return;
 
@@ -5563,6 +5568,14 @@
     return items.sort((a, b) => {
       return priority.indexOf(normalizeAssetMime(a.type)) - priority.indexOf(normalizeAssetMime(b.type));
     })[0];
+  }
+
+  function isStepDescriptionPasteArea(target) {
+    const cell = target && target.closest ? target.closest(".text-cell") : null;
+    if (!cell) return false;
+    const key = cell.dataset.cellKey || "";
+    if (STEP_CARD_GROUPS.some((group) => group.descKey === key)) return true;
+    return /^step-.+-desc$/.test(key);
   }
 
   function cancelDeferredCardPaste() {
@@ -5748,6 +5761,8 @@
   }
 
   function getPasteTarget(target) {
+    if (isStepDescriptionPasteArea(target)) return null;
+
     const targetSlot = getImageSlotFromElement(target);
     if (targetSlot) return targetSlot;
 
@@ -5807,7 +5822,7 @@
     }
     if (editableCell) {
       const page = editableCell.closest(".sop-page");
-      if (page && editableCell.dataset.cellKey === "c5r1") {
+      if (page && isProcessCellKey(editableCell.dataset.cellKey)) {
         updatePageListProcessLabelForPage(page);
       }
     }
@@ -12101,11 +12116,15 @@
   }
 
   function getPageProcessName(page) {
-    const processCell = getPageCellByKey(page, "c5r1");
+    const processCell = getPageCellByKey(page, "c8r1") || getPageCellByKey(page, "c5r1");
     if (!processCell) return "";
     const valueElement = getTextCellValueElement(processCell);
     const value = valueElement ? valueElement.textContent : getTextCellPersistedText(processCell);
     return String(value || "").trim();
+  }
+
+  function isProcessCellKey(cellKey) {
+    return cellKey === "c8r1" || cellKey === "c5r1";
   }
 
   function updatePageListProcessLabelForPage(page) {
