@@ -247,6 +247,7 @@
   let selectedMaterialCard = null;
   let materialCardClipboard = null;
   let deferredCardPaste = null;
+  let deferredOverlayPaste = null;
   let cardClipboardIntent = null;
   let cardClipboardIntentSerial = 0;
   let overlayClipboard = null;
@@ -5550,6 +5551,7 @@
 
     event.preventDefault();
     cancelDeferredCardPaste();
+    cancelDeferredOverlayPaste();
     clearCardClipboardIntent();
     activateImageSlot(slot);
     try {
@@ -5583,6 +5585,13 @@
       clearTimeout(deferredCardPaste.timer);
     }
     deferredCardPaste = null;
+  }
+
+  function cancelDeferredOverlayPaste() {
+    if (deferredOverlayPaste && deferredOverlayPaste.timer) {
+      clearTimeout(deferredOverlayPaste.timer);
+    }
+    deferredOverlayPaste = null;
   }
 
   function markCardClipboardIntent(kind) {
@@ -5649,6 +5658,35 @@
     return Boolean(getPasteTarget(event.target));
   }
 
+  function shouldLetImageClipboardPasteBeforeOverlay(event) {
+    if (editor.isOpen) return true;
+    return Boolean(getPasteTarget(event.target));
+  }
+
+  function scheduleDeferredOverlayPaste(scope) {
+    cancelDeferredOverlayPaste();
+    deferredOverlayPaste = {
+      scope,
+      slot: editor.isOpen ? editor.slot : null,
+      pageId: currentPageId,
+      timer: window.setTimeout(() => {
+        const pending = deferredOverlayPaste;
+        deferredOverlayPaste = null;
+        if (!pending || !overlayClipboard) return;
+
+        if (pending.scope === "editor") {
+          if (!editor.isOpen || editor.slot !== pending.slot) return;
+          pasteEditorOverlay();
+          return;
+        }
+
+        if (pending.pageId && currentPageId !== pending.pageId) return;
+        pasteGlobalOverlay();
+      }, 80)
+    };
+    return true;
+  }
+
   async function handleDocumentKeyDown(event) {
     const activeElement = document.activeElement;
     const isTyping = activeElement &&
@@ -5679,7 +5717,11 @@
         event.preventDefault();
         return;
       }
-      if (key === "v" && overlayClipboard && pasteGlobalOverlay()) {
+      if (key === "v" && overlayClipboard) {
+        if (shouldLetImageClipboardPasteBeforeOverlay(event) && scheduleDeferredOverlayPaste("global")) {
+          return;
+        }
+        if (!pasteGlobalOverlay()) return;
         event.preventDefault();
         return;
       }
@@ -5723,7 +5765,11 @@
         event.preventDefault();
         return;
       }
-      if (key === "v" && pasteEditorOverlay()) {
+      if (key === "v" && overlayClipboard) {
+        if (shouldLetImageClipboardPasteBeforeOverlay(event) && scheduleDeferredOverlayPaste("editor")) {
+          return;
+        }
+        if (!pasteEditorOverlay()) return;
         event.preventDefault();
         return;
       }
@@ -5928,6 +5974,14 @@
         markClean();
         await saveCurrentProjectToLibrary({ silent: true, skipVersion: true });
         return;
+      }
+      if (projectState.libraryFileHandle && projectState.libraryFileHandle.createWritable) {
+        const saved = await saveCurrentProjectToLibrary({
+          silent: true,
+          skipVersion: true,
+          requestPermission: true
+        });
+        if (saved) return;
       }
       await saveProjectAs({ skipSnapshot: true });
     } catch (error) {
@@ -9626,6 +9680,19 @@
       let imagePasteKeyPrevented = false;
       let imagePasteEventPrevented = false;
       const clipboardImageFile = new File([await imageSourceToBlob(imageData)], "selftest-clipboard.png", { type: "image/png" });
+      overlayClipboard = {
+        kind: "annotation",
+        model: {
+          id: newOverlayId(),
+          type: "rect",
+          x: 4,
+          y: 4,
+          width: 18,
+          height: 18,
+          color: DEFAULT_OVERLAY_COLOR
+        }
+      };
+      const globalOverlayCountBeforeImagePaste = (stepPage._globalAnnotationModels || []).length;
       await handleDocumentKeyDown({
         ctrlKey: true,
         metaKey: false,
@@ -9657,7 +9724,9 @@
         imagePasteEventPrevented &&
         imagePasteStepDesc.textContent === "SELFTEST_IMAGE_TARGET" &&
         imagePasteStepNote.textContent === "SELFTEST_IMAGE_TARGET_NOTE" &&
-        imagePasteStep.image.dataset.hasImage === "true";
+        imagePasteStep.image.dataset.hasImage === "true" &&
+        (stepPage._globalAnnotationModels || []).length === globalOverlayCountBeforeImagePaste;
+      overlayClipboard = null;
 
       const imageUndoPrevented = await pressShortcut("z", { target: imagePasteStep.image });
       stepPage = getPages()[0];
