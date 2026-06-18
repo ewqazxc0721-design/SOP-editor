@@ -94,7 +94,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.10.0";
+  const APP_VERSION = "1.10.2";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -164,6 +164,7 @@
   const AUTOSAVE_MARKER_KEY = "sop-autosave-draft-marker";
   const AUTOSAVE_DEBOUNCE_MS = 3000;
   const AUTOSAVE_MAX_WAIT_MS = 60000;
+  const AUTOSAVE_FILE_WRITE_MIN_MS = 60000;
   const STORAGE_MODE_LOCAL = "local";
   const STORAGE_MODE_FEISHU = "feishu";
   const BOM_HISTORY_LIMIT = 12;
@@ -312,7 +313,10 @@
     pending: false,
     debounceTimer: 0,
     maxTimer: 0,
+    fileWriteTimer: 0,
     lastSavedAt: "",
+    lastFileSavedAt: "",
+    lastFileWriteAttemptAt: 0,
     lastError: ""
   };
 
@@ -5854,7 +5858,7 @@
     updateGlobalInfoControls(projectState.globalInfo);
     createVersionSnapshot("初始版本", { keepClean: true });
     updateGlobalInfoControls(projectState.globalInfo);
-    markClean();
+    markClean({ clearAutosave: Boolean(options.clearAutosave) });
   }
 
   function handleDocumentInput(event) {
@@ -5899,7 +5903,7 @@
     updateGlobalInfoControls(projectState.globalInfo);
     addPage();
     isApplyingProject = false;
-    initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop() });
+    initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop(), clearAutosave: true });
     if (hasLibraryConnection()) {
       await saveCurrentProjectToLibrary({ reason: "新建SOP", silent: true });
     } else {
@@ -6028,6 +6032,10 @@
 
   async function writeProjectToHandle(handle, project) {
     const blob = await createSopPackageBlob(project);
+    await writeBlobToHandle(handle, blob);
+  }
+
+  async function writeBlobToHandle(handle, blob) {
     const writable = await handle.createWritable();
     await writable.write(blob);
     await writable.close();
@@ -6263,7 +6271,7 @@
     };
   }
 
-  async function applyProject(project, fileName, fileHandle) {
+  async function applyProject(project, fileName, fileHandle, options = {}) {
     if (editor.isOpen) {
       closeImageEditor();
     }
@@ -6293,7 +6301,7 @@
       createVersionSnapshot("导入版本", { keepClean: true });
     }
     updateGlobalInfoControls(projectState.globalInfo);
-    markClean();
+    markClean({ clearAutosave: options.clearAutosave !== false });
   }
 
   async function applyPages(pagesData) {
@@ -6562,9 +6570,11 @@
     updateProjectUi();
   }
 
-  function markClean() {
+  function markClean(options = {}) {
     projectState.dirty = false;
-    clearAutosaveDraftState();
+    if (options.clearAutosave !== false) {
+      clearAutosaveDraftState();
+    }
     updateProjectUi();
   }
 
@@ -6633,7 +6643,14 @@
     updateAutosaveStatus("正在自动保存");
     try {
       const savedAt = new Date().toISOString();
-      const project = serializeProject({ includeHistory: false });
+      const project = serializeProject({ includeHistory: true });
+      let packageBlob = null;
+      let packageError = "";
+      try {
+        packageBlob = await createSopPackageBlob(project);
+      } catch (error) {
+        packageError = error && error.message ? error.message : String(error || "项目包草稿生成失败");
+      }
       const record = {
         id: AUTOSAVE_DRAFT_KEY,
         documentId: projectState.documentId,
@@ -6642,13 +6659,26 @@
         savedAt,
         reason: options.reason || "auto",
         appVersion: APP_VERSION,
-        project
+        project,
+        packageBlob,
+        packageError
       };
       await idbPut("drafts", record);
       writeAutosaveMarker(record);
       autosaveState.lastSavedAt = savedAt;
-      updateAutosaveStatus();
-      showAutosaveToast(savedAt, options);
+      const fileSaved = packageBlob ? await maybeAutoSaveLocalFile(packageBlob, project, options) : false;
+      if (fileSaved) {
+        projectState.dirty = false;
+        clearAutosaveDraftState();
+        updateProjectUi();
+      } else {
+        updateAutosaveStatus();
+      }
+      showAutosaveToast(savedAt, {
+        ...options,
+        mode: fileSaved ? "file" : "draft",
+        packageError
+      });
       return true;
     } catch (error) {
       autosaveState.lastError = error && error.message ? error.message : String(error || "自动保存失败");
@@ -6676,6 +6706,52 @@
     }
   }
 
+  async function maybeAutoSaveLocalFile(packageBlob, project, options = {}) {
+    const handle = getAutosaveWritableFileHandle();
+    if (!handle || !packageBlob || isFeishuLibraryActive()) return false;
+
+    const now = Date.now();
+    const force = Boolean(options.forceFileWrite) || ["beforeunload", "pagehide", "visibility-hidden"].includes(options.reason);
+    const elapsed = now - autosaveState.lastFileWriteAttemptAt;
+    if (!force && elapsed < AUTOSAVE_FILE_WRITE_MIN_MS) {
+      scheduleDeferredLocalFileAutosave(AUTOSAVE_FILE_WRITE_MIN_MS - elapsed);
+      return false;
+    }
+    window.clearTimeout(autosaveState.fileWriteTimer);
+    autosaveState.fileWriteTimer = 0;
+    autosaveState.lastFileWriteAttemptAt = now;
+
+    try {
+      await writeBlobToHandle(handle, packageBlob);
+      autosaveState.lastFileSavedAt = new Date().toISOString();
+      if (handle === projectState.libraryFileHandle) {
+        projectState.libraryFileId = createLibraryFileId(projectState.folderId || DEFAULT_FOLDER_ID, normalizeProjectFileName(projectState.fileName));
+      }
+      return true;
+    } catch (error) {
+      autosaveState.lastError = error && error.message ? error.message : String(error || "自动保存到本地文件失败");
+      return false;
+    }
+  }
+
+  function scheduleDeferredLocalFileAutosave(delayMs) {
+    window.clearTimeout(autosaveState.fileWriteTimer);
+    autosaveState.fileWriteTimer = window.setTimeout(() => {
+      autosaveState.fileWriteTimer = 0;
+      void flushAutosaveDraft({ reason: "file-throttle", forceFileWrite: true });
+    }, Math.max(1000, delayMs));
+  }
+
+  function getAutosaveWritableFileHandle() {
+    if (projectState.fileHandle && projectState.fileHandle.createWritable) {
+      return projectState.fileHandle;
+    }
+    if (projectState.libraryFileHandle && projectState.libraryFileHandle.createWritable) {
+      return projectState.libraryFileHandle;
+    }
+    return null;
+  }
+
   function readAutosaveMarker() {
     try {
       return JSON.parse(window.localStorage.getItem(AUTOSAVE_MARKER_KEY) || "null");
@@ -6687,8 +6763,10 @@
   function clearAutosaveDraftState() {
     window.clearTimeout(autosaveState.debounceTimer);
     window.clearTimeout(autosaveState.maxTimer);
+    window.clearTimeout(autosaveState.fileWriteTimer);
     autosaveState.debounceTimer = 0;
     autosaveState.maxTimer = 0;
+    autosaveState.fileWriteTimer = 0;
     autosaveState.pending = false;
     autosaveState.lastError = "";
     try {
@@ -6703,31 +6781,52 @@
 
   async function offerAutosaveDraftRestore() {
     if (!libraryState.db) return;
-    const marker = readAutosaveMarker();
-    if (!marker || !marker.id) {
-      updateAutosaveStatus();
-      return;
-    }
-    const draft = await idbGet("drafts", marker.id).catch(() => null);
-    if (!draft || !draft.project) {
-      clearAutosaveDraftState();
+    const draft = await loadAutosaveDraftRecord();
+    if (!draft || (!draft.project && !draft.packageBlob)) {
       updateAutosaveStatus();
       return;
     }
     const savedAtText = formatDateTime(draft.savedAt);
     const name = removeProjectExtension(draft.fileName || "未命名");
-    const shouldRestore = window.confirm(`检测到自动保存草稿：${name}\n保存时间：${savedAtText}\n是否恢复这份草稿？`);
+    const restoreType = draft.packageBlob ? "完整项目包草稿" : "结构草稿";
+    const shouldRestore = window.confirm(`检测到自动保存草稿：${name}\n保存时间：${savedAtText}\n类型：${restoreType}\n是否恢复这份草稿？`);
     if (!shouldRestore) {
       clearAutosaveDraftState();
       updateAutosaveStatus();
       return;
     }
-    await applyProject(draft.project, draft.fileName || "自动保存草稿.sopzip", null);
+
+    const restoredProject = await loadProjectFromAutosaveDraft(draft);
+    await applyProject(restoredProject, draft.fileName || "自动保存草稿.sopzip", draft.fileHandle || null, { clearAutosave: false });
     projectState.folderId = draft.folderId || projectState.folderId || DEFAULT_FOLDER_ID;
+    projectState.libraryFileHandle = draft.libraryFileHandle || projectState.libraryFileHandle || null;
+    projectState.libraryFileId = draft.libraryFileId || projectState.libraryFileId || "";
     projectState.dirty = true;
     autosaveState.lastSavedAt = draft.savedAt || "";
     updateProjectUi();
     scheduleAutosaveDraft({ delayMs: AUTOSAVE_DEBOUNCE_MS, reason: "restore" });
+  }
+
+  async function loadAutosaveDraftRecord() {
+    const marker = readAutosaveMarker();
+    let draft = null;
+    if (marker && marker.id) {
+      draft = await idbGet("drafts", marker.id).catch(() => null);
+    }
+    if (!draft) {
+      draft = await idbGet("drafts", AUTOSAVE_DRAFT_KEY).catch(() => null);
+    }
+    return draft;
+  }
+
+  async function loadProjectFromAutosaveDraft(draft) {
+    if (draft.packageBlob) {
+      const file = new File([draft.packageBlob], normalizeProjectFileName(draft.fileName || "自动保存草稿.sopzip"), {
+        type: "application/zip"
+      });
+      return importSopPackageFromFile(file);
+    }
+    return draft.project;
   }
 
   function enableAutosaveDrafts(options = {}) {
@@ -6784,9 +6883,9 @@
     toast.setAttribute("role", "status");
 
     const title = document.createElement("strong");
-    title.textContent = "自动保存成功";
+    title.textContent = options.mode === "file" ? "已自动保存到本地文件" : "恢复草稿已缓存";
     const meta = document.createElement("span");
-    meta.textContent = formatTimeOnly(savedAt);
+    meta.textContent = options.packageError ? "图片资源未完整缓存" : formatTimeOnly(savedAt);
     toast.append(title, meta);
 
     toastHostEl.appendChild(toast);
@@ -7747,9 +7846,13 @@
       };
 
       request.onsuccess = () => {
+        const wasSettled = settled;
         const db = attachDbLifecycle(request.result);
         libraryState.db = db;
         enableAutosaveDrafts({ reason: "db-opened" });
+        if (wasSettled && !projectState.dirty && !new URLSearchParams(window.location.search).has("selftest")) {
+          void offerAutosaveDraftRestore().catch(() => {});
+        }
         finish(db);
       };
       request.onerror = () => {
@@ -10121,7 +10224,7 @@
         resetRuntimeCounters();
         addPage();
         isApplyingProject = false;
-        initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop() });
+        initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop(), clearAutosave: true });
       }
       await refreshLibrary();
       libraryStatusEl.textContent = "已删除电脑文件夹中的 SOP 文件";
@@ -10555,7 +10658,7 @@
         resetRuntimeCounters();
         addPage();
         isApplyingProject = false;
-        initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop() });
+        initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop(), clearAutosave: true });
       }
       await refreshFeishuLibrary({ silent: true });
       libraryStatusEl.textContent = "已删除飞书云盘中的 SOP 文件";
