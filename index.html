@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SOP模板编辑器</title>
-  <link rel="stylesheet" href="./styles.css?v=1.8.9">
+  <link rel="stylesheet" href="./styles.css?v=1.9.8">
 </head>
 <body>
   <main class="app-shell">
@@ -39,6 +39,10 @@
       </button>
       </div>
       <div class="page-count" id="page-count">1 / 1</div>
+      <label class="page-process-search">
+        <span>工序检索</span>
+        <input id="page-process-search" type="search" placeholder="输入工序跳转">
+      </label>
       <nav class="page-list" id="page-list" aria-label="页面列表"></nav>
     </aside>
 
@@ -214,9 +218,11 @@
       </div>
     </aside>
   </main>
+  <div class="autosave-status" id="autosave-status" aria-live="polite">自动保存准备中</div>
+  <div class="toast-host" id="toast-host" aria-live="polite" aria-atomic="true"></div>
 
   <script src="./vendor/xlsx.full.min.js"></script>
   <script src="./vendor/jszip.min.js"></script>
-  <script src="./app.js?v=1.8.9"></script>
+  <script src="./app.js?v=1.9.8"></script>
 </body>
 </html>

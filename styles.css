@@ -302,6 +302,86 @@ button {
   border-bottom: 1px solid #394556;
 }
 
+.page-process-search {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0;
+  color: #d7dee8;
+  font-size: 12px;
+}
+
+.page-process-search input {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  color: #102033;
+  background: #f8fbff;
+  border: 1px solid #7daee9;
+  border-radius: 5px;
+  outline: none;
+}
+
+.page-process-search input:focus {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+}
+
+.autosave-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  border: 0;
+  clip-path: inset(50%);
+}
+
+.toast-host {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 4000;
+  display: grid;
+  gap: 8px;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 170px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 9px 13px;
+  color: #ecfdf5;
+  font-size: 13px;
+  line-height: 1.25;
+  background: #102033;
+  border: 1px solid rgba(34, 197, 94, 0.72);
+  border-radius: 7px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast strong {
+  font-weight: 700;
+}
+
+.toast span {
+  color: #bbf7d0;
+  font-size: 12px;
+}
+
 .page-list {
   display: flex;
   flex: 1 1 auto;
@@ -336,7 +416,11 @@ button {
 }
 
 .page-list-button {
-  width: auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
   flex: 1 1 auto;
   min-height: 34px;
   padding: 6px 10px;
@@ -348,6 +432,18 @@ button {
   cursor: pointer;
 }
 
+.page-list-page-label {
+  white-space: nowrap;
+}
+
+.page-list-process-label {
+  min-width: 0;
+  color: #8ea0b8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .page-list-button:hover {
   background: #2b3544;
 }
@@ -356,6 +452,15 @@ button {
   color: #102033;
   background: #e6f2ff;
   border-color: #b7d8ff;
+}
+
+.page-list-button.active .page-list-process-label {
+  color: #38516f;
+}
+
+.page-list-button.is-search-match {
+  border-color: #f59e0b;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.45);
 }
 
 .workspace {

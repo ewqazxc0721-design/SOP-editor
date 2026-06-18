@@ -2,6 +2,9 @@
   const pagesEl = document.getElementById("pages");
   const pageListEl = document.getElementById("page-list");
   const pageCountEl = document.getElementById("page-count");
+  const pageProcessSearchInput = document.getElementById("page-process-search");
+  const autosaveStatusEl = document.getElementById("autosave-status");
+  const toastHostEl = document.getElementById("toast-host");
   const addPageButton = document.getElementById("add-page");
   const deletePageButton = document.getElementById("delete-page");
   const printButton = document.getElementById("print-pages");
@@ -91,7 +94,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.9.0";
+  const APP_VERSION = "1.9.8";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -143,7 +146,7 @@
   ];
   const SOP_FILE_TYPE = "sop-template-project";
   const LIBRARY_DB_NAME = "sop-template-library";
-  const LIBRARY_DB_VERSION = 4;
+  const LIBRARY_DB_VERSION = 5;
   const DEFAULT_FOLDER_ID = "root";
   const ALL_FOLDER_ID = "all";
   const ROOT_DIRECTORY_SETTING_KEY = "rootDirectory";
@@ -157,6 +160,10 @@
   const MAX_UNDO_STEPS = 50;
   const GLOBAL_INFO_PANEL_COLLAPSED_KEY = "sop-global-info-panel-collapsed";
   const FOLDER_TREE_EXPANDED_KEY = "sop-folder-tree-expanded";
+  const AUTOSAVE_DRAFT_KEY = "current";
+  const AUTOSAVE_MARKER_KEY = "sop-autosave-draft-marker";
+  const AUTOSAVE_DEBOUNCE_MS = 3000;
+  const AUTOSAVE_MAX_WAIT_MS = 60000;
   const STORAGE_MODE_LOCAL = "local";
   const STORAGE_MODE_FEISHU = "feishu";
   const BOM_HISTORY_LIMIT = 12;
@@ -296,6 +303,16 @@
       folderToken: "",
       connected: false
     }
+  };
+
+  const autosaveState = {
+    ready: false,
+    saving: false,
+    pending: false,
+    debounceTimer: 0,
+    maxTimer: 0,
+    lastSavedAt: "",
+    lastError: ""
   };
 
   const materialSearch = {
@@ -552,6 +569,10 @@
     });
   });
   versionSelect.addEventListener("dblclick", rollbackToSelectedVersion);
+  if (pageProcessSearchInput) {
+    pageProcessSearchInput.addEventListener("input", handlePageProcessSearchInput);
+    pageProcessSearchInput.addEventListener("keydown", handlePageProcessSearchKeyDown);
+  }
   openProjectInput.addEventListener("change", handleFallbackOpenFile);
   libraryToggleButton.addEventListener("click", () => setLibraryCollapsed(!libraryState.collapsed));
   libraryPickFolderButton.addEventListener("click", pickLibraryFolder);
@@ -606,8 +627,11 @@
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       clearCardClipboardIntent();
+      flushAutosaveDraft({ reason: "visibility-hidden" });
     }
   });
+  window.addEventListener("pagehide", () => flushAutosaveDraft({ reason: "pagehide" }));
+  window.addEventListener("beforeunload", () => flushAutosaveDraft({ reason: "beforeunload" }));
   window.addEventListener("blur", clearCardClipboardIntent);
   document.addEventListener("mouseup", endStepCardPointerDrag, true);
   document.addEventListener("pointermove", handleMaterialCardPointerMove, true);
@@ -5781,6 +5805,12 @@
     if (editableCell || editorText) {
       markDirty();
     }
+    if (editableCell) {
+      const page = editableCell.closest(".sop-page");
+      if (page && editableCell.dataset.cellKey === "c5r1") {
+        updatePageListProcessLabelForPage(page);
+      }
+    }
     if (editableCell && ["number", "name"].includes(editableCell.dataset.materialField)) {
       activeMaterialSearchCell = editableCell;
       if (materialSearch.popover && !materialSearch.popover.hidden) {
@@ -5809,7 +5839,11 @@
     addPage();
     isApplyingProject = false;
     initializeProjectState("未命名.sopzip", null, { folderId: getLibraryFolderForNewSop() });
-    await saveCurrentProjectToLibrary({ reason: "新建SOP", silent: true });
+    if (hasLibraryConnection()) {
+      await saveCurrentProjectToLibrary({ reason: "新建SOP", silent: true });
+    } else {
+      libraryStatusEl.textContent = "已新建本地 SOP；选择文件夹后可保存到 SOP库。";
+    }
   }
 
   async function openProjectFile() {
@@ -5859,7 +5893,11 @@
     const project = await loadProjectDocumentFromFile(file);
     validateProjectFile(project);
     await applyProject(project, file.name || "未命名.sopzip", isSopPackageFileName(file.name) ? fileHandle : null);
-    await saveCurrentProjectToLibrary({ reason: "导入到SOP库", silent: true, skipVersion: true });
+    if (hasLibraryConnection()) {
+      await saveCurrentProjectToLibrary({ reason: "导入到SOP库", silent: true, skipVersion: true });
+    } else {
+      libraryStatusEl.textContent = "已打开本地 SOP；选择文件夹后可保存到 SOP库。";
+    }
   }
 
   async function saveProject() {
@@ -6451,11 +6489,13 @@
   function markDirty() {
     if (isApplyingProject || !projectState.documentId) return;
     projectState.dirty = true;
+    scheduleAutosaveDraft();
     updateProjectUi();
   }
 
   function markClean() {
     projectState.dirty = false;
+    clearAutosaveDraftState();
     updateProjectUi();
   }
 
@@ -6476,6 +6516,226 @@
       versionSelect.value = String(projectState.currentVersion);
     }
     syncLibraryActiveState();
+    updateAutosaveStatus();
+  }
+
+  function scheduleAutosaveDraft(options = {}) {
+    if (isApplyingProject || !projectState.documentId) return;
+    autosaveState.pending = true;
+    updateAutosaveStatus("等待自动保存");
+
+    window.clearTimeout(autosaveState.debounceTimer);
+    autosaveState.debounceTimer = window.setTimeout(() => {
+      flushAutosaveDraft({ reason: options.reason || "debounce" });
+    }, options.delayMs === undefined ? AUTOSAVE_DEBOUNCE_MS : options.delayMs);
+
+    if (!autosaveState.maxTimer) {
+      autosaveState.maxTimer = window.setTimeout(() => {
+        flushAutosaveDraft({ reason: "max-wait" });
+      }, AUTOSAVE_MAX_WAIT_MS);
+    }
+  }
+
+  function flushAutosaveDraft(options = {}) {
+    if (isApplyingProject || !projectState.documentId || !projectState.dirty) return Promise.resolve(false);
+    window.clearTimeout(autosaveState.debounceTimer);
+    window.clearTimeout(autosaveState.maxTimer);
+    autosaveState.debounceTimer = 0;
+    autosaveState.maxTimer = 0;
+    autosaveState.pending = false;
+    return saveAutosaveDraft(options);
+  }
+
+  async function saveAutosaveDraft(options = {}) {
+    if (autosaveState.saving || !projectState.documentId || !projectState.dirty) return false;
+    if (!libraryState.db && window.indexedDB) {
+      await ensureAssetDbReady().catch((error) => {
+        autosaveState.lastError = error && error.message ? error.message : String(error || "自动保存失败");
+      });
+    }
+    if (!libraryState.db) {
+      autosaveState.ready = false;
+      updateAutosaveStatus();
+      return false;
+    }
+    enableAutosaveDrafts({ schedulePending: false });
+    autosaveState.saving = true;
+    autosaveState.lastError = "";
+    updateAutosaveStatus("正在自动保存");
+    try {
+      const savedAt = new Date().toISOString();
+      const project = serializeProject({ includeHistory: false });
+      const record = {
+        id: AUTOSAVE_DRAFT_KEY,
+        documentId: projectState.documentId,
+        fileName: projectState.fileName,
+        folderId: projectState.folderId || DEFAULT_FOLDER_ID,
+        savedAt,
+        reason: options.reason || "auto",
+        appVersion: APP_VERSION,
+        project
+      };
+      await idbPut("drafts", record);
+      writeAutosaveMarker(record);
+      autosaveState.lastSavedAt = savedAt;
+      updateAutosaveStatus();
+      showAutosaveToast(savedAt, options);
+      return true;
+    } catch (error) {
+      autosaveState.lastError = error && error.message ? error.message : String(error || "自动保存失败");
+      updateAutosaveStatus();
+      return false;
+    } finally {
+      autosaveState.saving = false;
+      if (autosaveState.pending && projectState.dirty) {
+        scheduleAutosaveDraft({ delayMs: AUTOSAVE_DEBOUNCE_MS, reason: "pending" });
+      }
+    }
+  }
+
+  function writeAutosaveMarker(record) {
+    try {
+      window.localStorage.setItem(AUTOSAVE_MARKER_KEY, JSON.stringify({
+        id: record.id,
+        documentId: record.documentId,
+        fileName: record.fileName,
+        savedAt: record.savedAt,
+        appVersion: record.appVersion
+      }));
+    } catch (error) {
+      // localStorage is only a hint; IndexedDB remains the source of truth.
+    }
+  }
+
+  function readAutosaveMarker() {
+    try {
+      return JSON.parse(window.localStorage.getItem(AUTOSAVE_MARKER_KEY) || "null");
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function clearAutosaveDraftState() {
+    window.clearTimeout(autosaveState.debounceTimer);
+    window.clearTimeout(autosaveState.maxTimer);
+    autosaveState.debounceTimer = 0;
+    autosaveState.maxTimer = 0;
+    autosaveState.pending = false;
+    autosaveState.lastError = "";
+    try {
+      window.localStorage.removeItem(AUTOSAVE_MARKER_KEY);
+    } catch (error) {
+      // Ignore storage cleanup failures.
+    }
+    if (libraryState.db) {
+      void idbDelete("drafts", AUTOSAVE_DRAFT_KEY).catch(() => {});
+    }
+  }
+
+  async function offerAutosaveDraftRestore() {
+    if (!libraryState.db) return;
+    const marker = readAutosaveMarker();
+    if (!marker || !marker.id) {
+      updateAutosaveStatus();
+      return;
+    }
+    const draft = await idbGet("drafts", marker.id).catch(() => null);
+    if (!draft || !draft.project) {
+      clearAutosaveDraftState();
+      updateAutosaveStatus();
+      return;
+    }
+    const savedAtText = formatDateTime(draft.savedAt);
+    const name = removeProjectExtension(draft.fileName || "未命名");
+    const shouldRestore = window.confirm(`检测到自动保存草稿：${name}\n保存时间：${savedAtText}\n是否恢复这份草稿？`);
+    if (!shouldRestore) {
+      clearAutosaveDraftState();
+      updateAutosaveStatus();
+      return;
+    }
+    await applyProject(draft.project, draft.fileName || "自动保存草稿.sopzip", null);
+    projectState.folderId = draft.folderId || projectState.folderId || DEFAULT_FOLDER_ID;
+    projectState.dirty = true;
+    autosaveState.lastSavedAt = draft.savedAt || "";
+    updateProjectUi();
+    scheduleAutosaveDraft({ delayMs: AUTOSAVE_DEBOUNCE_MS, reason: "restore" });
+  }
+
+  function enableAutosaveDrafts(options = {}) {
+    autosaveState.ready = true;
+    updateAutosaveStatus();
+    if (
+      options.schedulePending !== false &&
+      projectState.dirty &&
+      !autosaveState.saving &&
+      !autosaveState.debounceTimer
+    ) {
+      scheduleAutosaveDraft({
+        delayMs: options.delayMs === undefined ? AUTOSAVE_DEBOUNCE_MS : options.delayMs,
+        reason: options.reason || "ready"
+      });
+    }
+  }
+
+  function updateAutosaveStatus(message = "") {
+    if (!autosaveStatusEl) return;
+    if (!autosaveState.ready) {
+      autosaveStatusEl.textContent = "自动保存未启用";
+      autosaveStatusEl.classList.toggle("is-error", false);
+      return;
+    }
+    autosaveStatusEl.classList.toggle("is-error", Boolean(autosaveState.lastError));
+    if (autosaveState.lastError) {
+      autosaveStatusEl.textContent = `自动保存失败：${autosaveState.lastError}`;
+      return;
+    }
+    if (message) {
+      autosaveStatusEl.textContent = message;
+      return;
+    }
+    if (autosaveState.saving) {
+      autosaveStatusEl.textContent = "正在自动保存";
+      return;
+    }
+    if (autosaveState.pending) {
+      autosaveStatusEl.textContent = "等待自动保存";
+      return;
+    }
+    if (autosaveState.lastSavedAt) {
+      autosaveStatusEl.textContent = `草稿已自动保存 ${formatTimeOnly(autosaveState.lastSavedAt)}`;
+      return;
+    }
+    autosaveStatusEl.textContent = "自动保存已启用";
+  }
+
+  function showAutosaveToast(savedAt, options = {}) {
+    if (!toastHostEl || document.hidden || ["pagehide", "beforeunload"].includes(options.reason)) return;
+    const toast = document.createElement("div");
+    toast.className = "toast autosave-toast";
+    toast.setAttribute("role", "status");
+
+    const title = document.createElement("strong");
+    title.textContent = "自动保存成功";
+    const meta = document.createElement("span");
+    meta.textContent = formatTimeOnly(savedAt);
+    toast.append(title, meta);
+
+    toastHostEl.appendChild(toast);
+    window.requestAnimationFrame(() => {
+      toast.classList.add("is-visible");
+    });
+    window.setTimeout(() => {
+      toast.classList.remove("is-visible");
+      window.setTimeout(() => {
+        toast.remove();
+      }, 220);
+    }, 2200);
+  }
+
+  function formatTimeOnly(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString("zh-CN", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
   }
 
   function confirmDiscardChanges() {
@@ -6535,7 +6795,8 @@
     const hash = await hashBlob(normalizedBlob);
     const existing = findAssetByHash(hash);
     if (existing) {
-      await storeAssetBlob(existing, normalizedBlob, await getAssetThumbnailBlob(existing.id));
+      const thumbnailBlob = await createThumbnailBlob(normalizedBlob).catch(() => null);
+      await storeAssetBlob(existing, normalizedBlob, thumbnailBlob);
       return existing;
     }
 
@@ -6785,7 +7046,11 @@
     if (libraryState.db) return libraryState.db;
     if (!assetRuntime.dbPromise) {
       assetRuntime.dbPromise = openLibraryDb().then((db) => {
+        if (!db) {
+          throw new Error("本地数据库暂未就绪");
+        }
         libraryState.db = db;
+        enableAutosaveDrafts({ reason: "db-ready" });
         return db;
       }).finally(() => {
         assetRuntime.dbPromise = null;
@@ -6796,29 +7061,43 @@
 
   async function storeAssetBlob(record, blob, thumbnailBlob) {
     if (!record || !record.id || !blob) return;
-    await ensureAssetDbReady();
     const projectId = projectState.documentId;
     const key = assetStoreKey(projectId, record.id);
     assetRuntime.blobs.set(key, blob);
-    await idbPut("assets", {
-      key,
-      projectId,
-      assetId: record.id,
-      record,
-      blob,
-      updatedAt: new Date().toISOString()
-    });
     if (thumbnailBlob) {
       assetRuntime.thumbnails.set(key, thumbnailBlob);
-      await idbPut("thumbnails", {
-        key,
-        projectId,
-        assetId: record.id,
-        blob: thumbnailBlob,
-        mime: thumbnailBlob.type || "image/webp",
-        updatedAt: new Date().toISOString()
-      });
     }
+    persistAssetBlobInBackground(projectId, record, blob, thumbnailBlob);
+  }
+
+  function persistAssetBlobInBackground(projectId, record, blob, thumbnailBlob) {
+    void (async () => {
+      try {
+        await ensureAssetDbReady();
+        const key = assetStoreKey(projectId, record.id);
+        await idbPut("assets", {
+          key,
+          projectId,
+          assetId: record.id,
+          record,
+          blob,
+          updatedAt: new Date().toISOString()
+        });
+        if (thumbnailBlob) {
+          await idbPut("thumbnails", {
+            key,
+            projectId,
+            assetId: record.id,
+            blob: thumbnailBlob,
+            mime: thumbnailBlob.type || "image/webp",
+            updatedAt: new Date().toISOString()
+          });
+        }
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error || "本地数据库暂未就绪");
+        libraryStatusEl.textContent = `图片已插入，本地数据库稍后再保存：${message}`;
+      }
+    })();
   }
 
   async function getAssetBlob(assetId, projectId = projectState.documentId) {
@@ -7055,28 +7334,12 @@
   }
 
   async function storeImportedAssetBlob(projectId, record, blob, thumbnailBlob) {
-    await ensureAssetDbReady();
     const key = assetStoreKey(projectId, record.id);
     assetRuntime.blobs.set(key, blob);
-    await idbPut("assets", {
-      key,
-      projectId,
-      assetId: record.id,
-      record,
-      blob,
-      updatedAt: new Date().toISOString()
-    });
     if (thumbnailBlob) {
       assetRuntime.thumbnails.set(key, thumbnailBlob);
-      await idbPut("thumbnails", {
-        key,
-        projectId,
-        assetId: record.id,
-        blob: thumbnailBlob,
-        mime: thumbnailBlob.type || "image/webp",
-        updatedAt: new Date().toISOString()
-      });
     }
+    persistAssetBlobInBackground(projectId, record, blob, thumbnailBlob);
   }
 
   function validatePackageZipPaths(zip) {
@@ -7120,6 +7383,31 @@
       return parseLegacyProjectJsonFile(file);
     }
     throw new Error("请打开 .sopzip 项目包。旧版 .sop.json 暂不支持图片迁移。");
+  }
+
+  async function loadProjectDocumentMetadataFromFile(file) {
+    if (isSopPackageFileName(file.name)) {
+      if (!window.JSZip) {
+        throw new Error("SOP 项目包读取依赖 JSZip 未加载，请刷新页面后重试。");
+      }
+      const zip = await window.JSZip.loadAsync(await file.arrayBuffer());
+      validatePackageZipPaths(zip);
+      const manifest = await readPackageJson(zip, SOP_PACKAGE_MANIFEST_PATH);
+      if (!manifest || manifest.fileType !== SOP_PACKAGE_FILE_TYPE) {
+        throw new Error("这不是有效的 .sopzip 项目包。");
+      }
+      const project = await readPackageJson(zip, manifest.documentPath || SOP_PACKAGE_DOCUMENT_PATH);
+      validateProjectFile(project);
+      project.assets = normalizeAssetRecords(project.assets || {});
+      if (!project.document) project.document = {};
+      if (!project.document.id) project.document.id = createId("doc");
+      project.document.fileName = file.name || project.document.fileName || "未命名.sopzip";
+      return project;
+    }
+    if (isLegacyProjectFileName(file.name)) {
+      return parseLegacyProjectJsonFile(file);
+    }
+    throw new Error("请打开 .sopzip 项目包。");
   }
 
   async function parseLegacyProjectJsonFile(file) {
@@ -7257,7 +7545,27 @@
     }
 
     try {
-      libraryState.db = await openLibraryDb();
+      const db = await openLibraryDb();
+      if (!db) {
+        libraryState.db = null;
+        autosaveState.ready = false;
+        libraryState.bomHistory = [];
+        libraryStatusEl.textContent = libraryState.rootHandle ?
+          `已连接电脑文件夹：${libraryState.rootName || libraryState.rootHandle.name || "SOP库"}；本地数据库暂未就绪，本次授权可能不会被自动记住。` :
+          "本地数据库暂未就绪，可以先选择电脑文件夹继续使用；本次授权可能不会被自动记住。";
+        updateAutosaveStatus();
+        updateLibraryControls();
+        renderLibrary();
+        return;
+      }
+      libraryState.db = db;
+      enableAutosaveDrafts({ reason: "startup-ready" });
+      if (new URLSearchParams(window.location.search).has("selftest")) {
+        clearAutosaveDraftState();
+        updateAutosaveStatus();
+      } else {
+        await offerAutosaveDraftRestore();
+      }
       libraryState.bomHistory = await loadBomHistory();
       const storedMode = await loadLibraryStorageMode();
       const storedFeishu = await loadStoredFeishuSettings();
@@ -7302,6 +7610,38 @@
   function openLibraryDb() {
     return new Promise((resolve, reject) => {
       const request = window.indexedDB.open(LIBRARY_DB_NAME, LIBRARY_DB_VERSION);
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        resolve(value);
+      };
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        reject(error);
+      };
+      const attachDbLifecycle = (db) => {
+        db.onversionchange = () => {
+          db.close();
+          if (libraryState.db === db) {
+            libraryState.db = null;
+          }
+          assetRuntime.dbPromise = null;
+          autosaveState.ready = false;
+          libraryStatusEl.textContent = "本地数据库已被其它页面升级，请刷新当前页面后继续使用自动保存和历史缓存。";
+          updateAutosaveStatus();
+        };
+        return db;
+      };
+      const timeout = window.setTimeout(() => {
+        if (!libraryState.rootHandle) {
+          libraryStatusEl.textContent = "本地数据库打开较慢，可以先选择电脑文件夹继续使用；请尽量关闭其它已打开的 SOP编辑器页面。";
+        }
+        finish(null);
+      }, 12000);
 
       request.onupgradeneeded = () => {
         const db = request.result;
@@ -7320,6 +7660,11 @@
           const bomHistory = db.createObjectStore("bomHistory", { keyPath: "id" });
           bomHistory.createIndex("loadedAt", "loadedAt", { unique: false });
         }
+        if (!db.objectStoreNames.contains("drafts")) {
+          const drafts = db.createObjectStore("drafts", { keyPath: "id" });
+          drafts.createIndex("savedAt", "savedAt", { unique: false });
+          drafts.createIndex("documentId", "documentId", { unique: false });
+        }
         if (!db.objectStoreNames.contains("assets")) {
           const assets = db.createObjectStore("assets", { keyPath: "key" });
           assets.createIndex("projectId", "projectId", { unique: false });
@@ -7332,8 +7677,18 @@
         }
       };
 
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error || new Error("IndexedDB打开失败"));
+      request.onsuccess = () => {
+        const db = attachDbLifecycle(request.result);
+        libraryState.db = db;
+        enableAutosaveDrafts({ reason: "db-opened" });
+        finish(db);
+      };
+      request.onerror = () => {
+        fail(request.error || new Error("IndexedDB打开失败"));
+      };
+      request.onblocked = () => {
+        libraryStatusEl.textContent = "本地数据库升级被其它 SOP编辑器页面占用，请关闭其它页面后刷新。";
+      };
     });
   }
 
@@ -7351,9 +7706,12 @@
       libraryState.storageMode = STORAGE_MODE_LOCAL;
       libraryState.rootHandle = handle;
       libraryState.rootName = handle.name || "SOP库";
-      await saveLibraryStorageMode(STORAGE_MODE_LOCAL);
-      await saveStoredLibraryRoot(handle);
+      libraryState.ready = false;
+      libraryStatusEl.textContent = `正在读取电脑文件夹：${libraryState.rootName}`;
+      updateLibraryControls();
+      renderLibrary();
       await refreshLibrary({ requestPermission: true });
+      rememberLibraryFolderHandle(handle);
       libraryStatusEl.textContent = `已连接电脑文件夹：${libraryState.rootName}`;
     } catch (error) {
       if (error && error.name === "AbortError") return;
@@ -7385,6 +7743,8 @@
     }
 
     try {
+      libraryStatusEl.textContent = `正在读取电脑文件夹：${libraryState.rootHandle.name || libraryState.rootName || "SOP库"}`;
+      updateLibraryControls();
       libraryState.ready = true;
       libraryState.rootName = libraryState.rootHandle.name || "SOP库";
       const scan = await scanLibraryDirectory();
@@ -7420,7 +7780,8 @@
     const documents = [];
     const boms = [];
 
-    await scanLibraryFolder(libraryState.rootHandle, "", DEFAULT_FOLDER_ID, folders, documents, boms);
+    const scanStats = { entries: 0 };
+    await scanLibraryFolder(libraryState.rootHandle, "", DEFAULT_FOLDER_ID, folders, documents, boms, scanStats);
 
     folders.sort((a, b) => {
       if (a.id === DEFAULT_FOLDER_ID) return -1;
@@ -7436,7 +7797,7 @@
     return { folders, documents, boms };
   }
 
-  async function scanLibraryFolder(folderHandle, folderPath, folderId, folders, documents, boms) {
+  async function scanLibraryFolder(folderHandle, folderPath, folderId, folders, documents, boms, scanStats = { entries: 0 }) {
     const entries = [];
     for await (const [name, handle] of folderHandle.entries()) {
       entries.push([name, handle]);
@@ -7444,6 +7805,11 @@
     entries.sort((a, b) => a[0].localeCompare(b[0], "zh-Hans-CN"));
 
     for (const [name, handle] of entries) {
+      scanStats.entries += 1;
+      if (scanStats.entries % 25 === 0) {
+        libraryStatusEl.textContent = `正在读取电脑文件夹：已扫描 ${scanStats.entries} 项`;
+        await nextFrame();
+      }
       if (handle.kind === "directory") {
         const childPath = folderPath ? `${folderPath}/${name}` : name;
         const childFolder = {
@@ -7455,7 +7821,7 @@
           system: false
         };
         folders.push(childFolder);
-        await scanLibraryFolder(handle, childPath, childFolder.id, folders, documents, boms);
+        await scanLibraryFolder(handle, childPath, childFolder.id, folders, documents, boms, scanStats);
       } else if (handle.kind === "file" && isProjectFileName(name)) {
         const documentItem = await readLibraryDocument(handle, folderHandle, folderId, folderPath, name);
         if (documentItem) {
@@ -7484,7 +7850,7 @@
   async function readLibraryDocument(fileHandle, folderHandle, folderId, folderPath, fileName) {
     try {
       const file = await fileHandle.getFile();
-      const project = await loadProjectDocumentFromFile(file);
+      const project = await loadProjectDocumentMetadataFromFile(file);
       validateProjectFile(project);
       return {
         id: createLibraryFileId(folderId, fileName),
@@ -7499,6 +7865,7 @@
         lastVersion: Number(project.document && project.document.lastVersion) || 1,
         pageCount: Array.isArray(project.pages) ? project.pages.length : 0,
         updatedAt: file.lastModified ? new Date(file.lastModified).toISOString() : project.savedAt || "",
+        source: "folder",
         project
       };
     } catch (_) {
@@ -9551,12 +9918,16 @@
   }
 
   async function prepareCurrentProjectForSwitch() {
+    await flushAutosaveDraft({ reason: "switch" });
+    if (!projectState.dirty) return true;
     if (hasLibraryConnection()) {
-      return saveCurrentProjectToLibrary({
+      const saved = await saveCurrentProjectToLibrary({
         reason: "切换前自动保存",
         silent: true,
         requestPermission: true
       });
+      if (saved) return true;
+      return confirmDiscardChanges();
     }
     return confirmDiscardChanges();
   }
@@ -9569,6 +9940,16 @@
       libraryStatusEl.textContent = "找不到这个 SOP 文件";
       await refreshLibrary();
       return;
+    }
+    if (documentItem.source !== STORAGE_MODE_FEISHU && documentItem.fileHandle) {
+      try {
+        libraryStatusEl.textContent = `正在读取 SOP：${removeProjectExtension(documentItem.name)}`;
+        const file = await documentItem.fileHandle.getFile();
+        documentItem.project = await loadProjectDocumentFromFile(file);
+      } catch (error) {
+        libraryStatusEl.textContent = `读取 SOP 失败：${error.message || error}`;
+        return;
+      }
     }
     if (!documentItem.project && documentItem.source === STORAGE_MODE_FEISHU) {
       try {
@@ -9763,6 +10144,20 @@
       handle,
       name: handle.name || "SOP库",
       updatedAt: new Date().toISOString()
+    });
+  }
+
+  function rememberLibraryFolderHandle(handle) {
+    if (!handle) return;
+    void (async () => {
+      await ensureAssetDbReady();
+      await Promise.all([
+        saveLibraryStorageMode(STORAGE_MODE_LOCAL),
+        saveStoredLibraryRoot(handle)
+      ]);
+    })().catch((error) => {
+      const message = error && error.message ? error.message : String(error || "");
+      libraryStatusEl.textContent = `已连接电脑文件夹，但暂未记住授权：${message}`;
     });
   }
 
@@ -11654,8 +12049,15 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "page-list-button";
-      button.textContent = `第 ${index + 1} 页`;
       button.dataset.pageId = page.dataset.pageId;
+      const pageLabel = document.createElement("span");
+      pageLabel.className = "page-list-page-label";
+      pageLabel.textContent = `第 ${index + 1} 页`;
+      const processLabel = document.createElement("span");
+      processLabel.className = "page-list-process-label";
+      processLabel.textContent = getPageProcessName(page);
+      processLabel.title = processLabel.textContent;
+      button.append(pageLabel, processLabel);
       if (page.dataset.pageId === currentPageId) {
         button.classList.add("active");
       }
@@ -11694,6 +12096,58 @@
 
       item.append(button);
       pageListEl.appendChild(item);
+    });
+    updatePageSearchMatchState();
+  }
+
+  function getPageProcessName(page) {
+    const processCell = getPageCellByKey(page, "c5r1");
+    if (!processCell) return "";
+    const valueElement = getTextCellValueElement(processCell);
+    const value = valueElement ? valueElement.textContent : getTextCellPersistedText(processCell);
+    return String(value || "").trim();
+  }
+
+  function updatePageListProcessLabelForPage(page) {
+    if (!page || !page.dataset) return;
+    const button = pageListEl.querySelector(`.page-list-button[data-page-id="${cssEscape(page.dataset.pageId)}"]`);
+    if (!button) return;
+    const label = button.querySelector(".page-list-process-label");
+    if (!label) return;
+    label.textContent = getPageProcessName(page);
+    label.title = label.textContent;
+    updatePageSearchMatchState();
+  }
+
+  function handlePageProcessSearchInput() {
+    jumpToPageProcessSearchMatch();
+  }
+
+  function handlePageProcessSearchKeyDown(event) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      jumpToPageProcessSearchMatch();
+    }
+  }
+
+  function jumpToPageProcessSearchMatch() {
+    if (!pageProcessSearchInput) return;
+    const keyword = normalizeSearchText(pageProcessSearchInput.value);
+    updatePageSearchMatchState();
+    if (!keyword) return;
+    const match = getPages().find((page) => normalizeSearchText(getPageProcessName(page)).includes(keyword));
+    if (!match) return;
+    setCurrentPage(match.dataset.pageId);
+    match.scrollIntoView({ behavior: "smooth", block: "start", inline: "start" });
+  }
+
+  function updatePageSearchMatchState() {
+    if (!pageProcessSearchInput) return;
+    const keyword = normalizeSearchText(pageProcessSearchInput.value);
+    pageListEl.querySelectorAll(".page-list-button").forEach((button) => {
+      const page = getPageById(button.dataset.pageId);
+      const matched = Boolean(keyword && page && normalizeSearchText(getPageProcessName(page)).includes(keyword));
+      button.classList.toggle("is-search-match", matched);
     });
   }
 
