@@ -6900,7 +6900,7 @@
       toast.classList.remove("is-visible");
       window.setTimeout(() => {
         toast.remove();
-      }, 100);
+      }, 220);
     }, 2200);
   }
 
