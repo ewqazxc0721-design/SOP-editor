@@ -7,6 +7,7 @@
   const toastHostEl = document.getElementById("toast-host");
   const addPageButton = document.getElementById("add-page");
   const deletePageButton = document.getElementById("delete-page");
+  const printCurrentPageButton = document.getElementById("print-current-page");
   const printButton = document.getElementById("print-pages");
   const batchPrintButton = document.getElementById("batch-print-pages");
   const exportPptxButton = document.getElementById("export-pptx");
@@ -94,7 +95,7 @@
     delete: document.getElementById("global-edit-delete")
   };
 
-  const APP_VERSION = "1.10.2";
+  const APP_VERSION = "1.10.3";
   const SOP_SCHEMA_VERSION = 3;
   const SOP_PACKAGE_FILE_TYPE = "sop-template-package";
   const SOP_PACKAGE_VERSION = 1;
@@ -259,6 +260,7 @@
   let scrollTicking = false;
   let isApplyingProject = false;
   let pendingBatchPrintRestore = null;
+  let currentPagePdfRestoreTitle = "";
   let globalInfoLogoSlot = null;
   let globalInfoLogoPreviewUrl = "";
 
@@ -490,6 +492,7 @@
 
   addPageButton.addEventListener("click", () => addPage({ scrollIntoView: true, stepTemplateCount: DEFAULT_STEP_TEMPLATE_COUNT }));
   deletePageButton.addEventListener("click", deleteCurrentPage);
+  printCurrentPageButton.addEventListener("click", exportCurrentPagePdf);
   printButton.addEventListener("click", exportPdf);
   batchPrintButton.addEventListener("click", batchExportPdf);
   exportPptxButton.addEventListener("click", exportPptx);
@@ -660,6 +663,7 @@
   window.addEventListener("pointerup", endGlobalDrag);
   window.addEventListener("pointercancel", endGlobalDrag);
   window.addEventListener("load", schedulePreviewScaleUpdate);
+  window.addEventListener("afterprint", cleanupCurrentPagePdfExport);
   window.addEventListener("afterprint", restorePendingBatchPrint);
 
   window.addEventListener("scroll", queueCurrentPageSync, { passive: true });
@@ -6896,7 +6900,7 @@
       toast.classList.remove("is-visible");
       window.setTimeout(() => {
         toast.remove();
-      }, 220);
+      }, 100);
     }, 2200);
   }
 
@@ -8850,7 +8854,7 @@
       closeTimer = window.setTimeout(() => {
         menu.classList.remove("is-open");
         closeTimer = 0;
-      }, 220);
+      }, 100);
     };
 
     wrapper.addEventListener("mouseenter", openMenu);
@@ -8876,7 +8880,7 @@
   }
 
   function buildExportCollapsePanel() {
-    const exportButtons = [printButton, batchPrintButton, exportPptxButton, batchExportPptxButton].filter(Boolean);
+    const exportButtons = [printCurrentPageButton, printButton, batchPrintButton, exportPptxButton, batchExportPptxButton].filter(Boolean);
     if (!exportButtons.length || document.getElementById("export-panel")) return;
 
     exportPanel = document.createElement("section");
@@ -11880,6 +11884,45 @@
 
   function delay(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function exportCurrentPagePdf() {
+    if (pendingBatchPrintRestore || libraryState.busy) return;
+    const page = getCurrentPage();
+    if (!page) {
+      window.alert("当前没有可导出的页面。");
+      return;
+    }
+    if (editor.isOpen) {
+      closeImageEditor();
+    }
+    cleanupCurrentPagePdfExport();
+    currentPagePdfRestoreTitle = document.title;
+    const pageIndex = currentPageIndex();
+    const baseName = removeProjectExtension(projectState.fileName || "未命名");
+    document.title = `${baseName}-第${pageIndex}页`;
+    document.body.classList.add("print-current-page-only");
+    page.classList.add("print-target-page");
+    libraryStatusEl.textContent = `正在导出当前页 PDF：第 ${pageIndex} 页`;
+    window.setTimeout(() => {
+      try {
+        window.print();
+      } catch (error) {
+        cleanupCurrentPagePdfExport();
+        showFileError("导出当前页PDF失败", error);
+      }
+    }, 80);
+  }
+
+  function cleanupCurrentPagePdfExport() {
+    document.body.classList.remove("print-current-page-only");
+    document.querySelectorAll(".sop-page.print-target-page").forEach((page) => {
+      page.classList.remove("print-target-page");
+    });
+    if (currentPagePdfRestoreTitle) {
+      document.title = currentPagePdfRestoreTitle;
+      currentPagePdfRestoreTitle = "";
+    }
   }
 
   function exportPdf() {

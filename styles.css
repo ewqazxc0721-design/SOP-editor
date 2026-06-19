@@ -2913,6 +2913,16 @@ body.editor-open {
     break-after: auto;
   }
 
+  body.print-current-page-only .sop-page {
+    display: none;
+  }
+
+  body.print-current-page-only .sop-page.print-target-page {
+    display: flex;
+    page-break-after: auto;
+    break-after: auto;
+  }
+
   .slot-tools,
   .step-card-drag-handle,
   .free-step-card-delete-button,

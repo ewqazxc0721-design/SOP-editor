@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>SOP模板编辑器</title>
-  <link rel="stylesheet" href="./styles.css?v=1.10.2">
+  <link rel="stylesheet" href="./styles.css?v=1.10.3">
 </head>
 <body>
   <main class="app-shell">
@@ -20,6 +20,10 @@
       <button class="toolbar-button" id="delete-page" type="button">
         <span class="button-icon">×</span>
         <span>删除当前页</span>
+      </button>
+      <button class="toolbar-button" id="print-current-page" type="button">
+        <span class="button-icon">PDF1</span>
+        <span>导出当前页PDF</span>
       </button>
       <button class="toolbar-button" id="print-pages" type="button">
         <span class="button-icon">PDF</span>
@@ -223,6 +227,6 @@
 
   <script src="./vendor/xlsx.full.min.js"></script>
   <script src="./vendor/jszip.min.js"></script>
-  <script src="./app.js?v=1.10.2"></script>
+  <script src="./app.js?v=1.10.3"></script>
 </body>
 </html>
